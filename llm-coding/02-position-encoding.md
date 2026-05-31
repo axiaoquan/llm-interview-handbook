@@ -58,7 +58,7 @@ x = token_emb + sinusoidal_pe(L, d_model)[:L].to(x.device)
 把位置 m 的 query/key 通过**旋转矩阵**编码：
 
 $$
-\tilde{q}_m = q_m \cdot \cos(m\theta) + \text{rotate\\_half}(q_m) \cdot \sin(m\theta)
+\tilde{q}_m = q_m \cdot \cos(m\theta) + \mathrm{rotateHalf}(q_m) \cdot \sin(m\theta)
 $$
 
 旋转后，attention 的内积 $\tilde{q}_m^T \tilde{k}_n$ **只跟相对位置 (m-n) 有关**。

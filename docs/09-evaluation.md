@@ -17,7 +17,7 @@
 Perplexity = 模型对测试集的不确定性，等于交叉熵的指数：
 
 $$
-\mathrm{PPL} = \exp\left(-\frac{1}{N}\sum_{i=1}^{N} \log P(x_i \mid x_{<i})\right)
+\mathrm{PPL} = \exp\left(-\frac{1}{N}\sum_{i=1}^{N} \log P(x_i \mid x_{1:i-1})\right)
 $$
 
 PPL 越低，模型越确定。直观理解：模型每一步在多少个候选中"犹豫"。

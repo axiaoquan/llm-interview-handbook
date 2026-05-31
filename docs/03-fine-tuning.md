@@ -158,7 +158,7 @@ $$
 ### 📖 损失函数
 
 $$
-\mathcal{L} = -\sum_{t \in \text{output}} \log P(x_t \mid x_{<t})
+\mathcal{L} = -\sum_{t \in \text{output}} \log P(x_t \mid x_{1:t-1})
 $$
 
 只在 **assistant 回复部分**算损失（不算 user 输入和 system prompt）。

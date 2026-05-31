@@ -29,7 +29,7 @@
 
 ### 📖 Activation 显存
 
-约 $O(\text{batch} \times \text{seq\_len} \times d \times \text{layers})$。
+约 $O(B \times L \times d \times N)$（B=batch, L=seq len, N=layers）。
 长序列下经常超过参数显存 → 用 **Activation Checkpointing**（重新计算换显存）。
 
 ### 📖 推理显存
