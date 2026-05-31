@@ -68,7 +68,7 @@ def make_sft_labels(input_ids, prompt_length):
 把 one-hot 标签变成"接近 one-hot 但不极端"，正则化模型避免过自信。
 
 $$
-P_{\\text{smoothed}}(y_i) = (1 - \\epsilon) \\cdot \\mathbb{1}[y_i = y] + \\frac{\\epsilon}{V}
+P_{\text{smoothed}}(y_i) = (1 - \epsilon) \cdot \mathbb{1}[y_i = y] + \frac{\epsilon}{V}
 $$
 
 ### 🛠 代码
@@ -122,7 +122,7 @@ loss = F.cross_entropy(logits, target, label_smoothing=0.1)
 直接优化偏好学习，跳过 reward model 和 PPO 的复杂 RL 训练。
 
 $$
-\\mathcal{L}_{DPO} = -\\log \\sigma\\left(\\beta \\log\\frac{\\pi_\\theta(y_w|x)}{\\pi_{\\text{ref}}(y_w|x)} - \\beta \\log\\frac{\\pi_\\theta(y_l|x)}{\\pi_{\\text{ref}}(y_l|x)}\\right)
+\mathcal{L}_{DPO} = -\log \sigma\left(\beta \log\frac{\pi_\theta(y_w|x)}{\pi_{\text{ref}}(y_w|x)} - \beta \log\frac{\pi_\theta(y_l|x)}{\pi_{\text{ref}}(y_l|x)}\right)
 $$
 
 ### 🛠 代码
@@ -179,10 +179,10 @@ def get_seq_logps(model, input_ids, labels, ignore_index=-100):
 RLHF 的 actor 损失，限制更新幅度避免训练崩溃。
 
 $$
-\\mathcal{L}^{CLIP} = \\mathbb{E}\\left[\\min\\left(r_t A_t, \\text{clip}(r_t, 1-\\epsilon, 1+\\epsilon) A_t\\right)\\right]
+\mathcal{L}^{CLIP} = \mathbb{E}\left[\min\left(r_t A_t, \text{clip}(r_t, 1-\epsilon, 1+\epsilon) A_t\right)\right]
 $$
 
-其中 $r_t = \\pi_\\theta(a_t|s_t) / \\pi_{\\text{old}}(a_t|s_t)$。
+其中 $r_t = \pi_\theta(a_t|s_t) / \pi_{\text{old}}(a_t|s_t)$。
 
 ### 🛠 代码
 
@@ -290,7 +290,7 @@ def grpo_loss(
 ### 🪤 GRPO 关键创新
 
 1. **Group-relative advantage**：去掉 value model，省一半显存和训练成本
-2. **Unbiased KL estimate**：$KL \\approx e^{p-q} - (p-q) - 1$，比直接 $p - q$ 更稳定
+2. **Unbiased KL estimate**：$KL \approx e^{p-q} - (p-q) - 1$，比直接 $p - q$ 更稳定
 3. **简单粗暴**：DeepSeek-R1 证明这套对推理类任务（数学、代码）效果很好
 
 ### 📊 PPO vs DPO vs GRPO

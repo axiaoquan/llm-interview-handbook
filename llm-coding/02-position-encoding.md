@@ -17,8 +17,8 @@
 原 Transformer 论文里的固定位置编码：
 
 $$
-PE_{(pos, 2i)} = \\sin\\left(\\frac{pos}{10000^{2i/d}}\\right), \\quad
-PE_{(pos, 2i+1)} = \\cos\\left(\\frac{pos}{10000^{2i/d}}\\right)
+PE_{(pos, 2i)} = \sin\left(\frac{pos}{10000^{2i/d}}\right), \quad
+PE_{(pos, 2i+1)} = \cos\left(\frac{pos}{10000^{2i/d}}\right)
 $$
 
 ### 🛠 代码
@@ -58,10 +58,10 @@ x = token_emb + sinusoidal_pe(L, d_model)[:L].to(x.device)
 把位置 m 的 query/key 通过**旋转矩阵**编码：
 
 $$
-\\tilde{q}_m = q_m \\cdot \\cos(m\\theta) + \\text{rotate\\_half}(q_m) \\cdot \\sin(m\\theta)
+\tilde{q}_m = q_m \cdot \cos(m\theta) + \text{rotate\\_half}(q_m) \cdot \sin(m\theta)
 $$
 
-旋转后，attention 的内积 $\\tilde{q}_m^T \\tilde{k}_n$ **只跟相对位置 (m-n) 有关**。
+旋转后，attention 的内积 $\tilde{q}_m^T \tilde{k}_n$ **只跟相对位置 (m-n) 有关**。
 
 ### 🛠 代码
 
@@ -144,7 +144,7 @@ q_embed:                    [B, h, L, d_k]
 不改 Q、K，直接在 attention 分数上**加一个线性偏置**：距离越远扣分越多。
 
 $$
-\\mathrm{score}_{ij} = q_i \\cdot k_j - m \\cdot |i - j|
+\mathrm{score}_{ij} = q_i \cdot k_j - m \cdot |i - j|
 $$
 
 每个头用不同的斜率 $m$（几何级数）。

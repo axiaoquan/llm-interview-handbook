@@ -15,7 +15,7 @@ Attention 全家桶，从最基础到生产级。
 ## Q01 · Scaled Dot-Product Attention
 
 ### 🎯 目标
-实现最核心的 attention：$\\mathrm{Attn}(Q,K,V) = \\mathrm{softmax}(\\frac{QK^T}{\\sqrt{d_k}})V$
+实现最核心的 attention：$\mathrm{Attn}(Q,K,V) = \mathrm{softmax}(\frac{QK^T}{\sqrt{d_k}})V$
 
 ### 🛠 代码
 
@@ -47,7 +47,7 @@ def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0):
 
 ### 🪤 易错点
 
-- **为什么除 $\\sqrt{d_k}$**：$Q \\cdot K$ 是 $d_k$ 项独立同分布之和，方差为 $d_k$；除掉 $\\sqrt{d_k}$ 让方差归一化到 1，softmax 不会饱和
+- **为什么除 $\sqrt{d_k}$**：$Q \cdot K$ 是 $d_k$ 项独立同分布之和，方差为 $d_k$；除掉 $\sqrt{d_k}$ 让方差归一化到 1，softmax 不会饱和
 - **`masked_fill` 不是 `mask_fill`**（少一个 d）
 - **mask 用 `-inf` 还是 `0`**：填 `-inf`，softmax 后变 0；直接乘 0 会导致归一化错位
 - **softmax 的 `dim`**：必须是 `-1`（key 维度），归一化"每个 query 对所有 key 的注意力分布"

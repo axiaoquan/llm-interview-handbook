@@ -16,13 +16,13 @@
 
 ### 🎯 目标
 
-把原 Linear $W \\in \\mathbb{R}^{d_{out} \\times d_{in}}$ 改成：
+把原 Linear $W \in \mathbb{R}^{d_{out} \times d_{in}}$ 改成：
 
 $$
-y = Wx + \\frac{\\alpha}{r} BA x
+y = Wx + \frac{\alpha}{r} BA x
 $$
 
-其中 $A \\in \\mathbb{R}^{r \\times d_{in}}$, $B \\in \\mathbb{R}^{d_{out} \\times r}$，$r$ 远小于 $d$。
+其中 $A \in \mathbb{R}^{r \times d_{in}}$, $B \in \mathbb{R}^{d_{out} \times r}$，$r$ 远小于 $d$。
 
 ### 🛠 代码
 
@@ -133,7 +133,7 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
 
 ### 🎯 目标
 
-部署时不想多两个矩阵乘法，把 $W' = W + \\frac{\\alpha}{r} BA$ 合并回去。
+部署时不想多两个矩阵乘法，把 $W' = W + \frac{\alpha}{r} BA$ 合并回去。
 
 ### 🛠 代码
 

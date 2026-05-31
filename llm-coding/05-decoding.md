@@ -137,7 +137,7 @@ top_p=0.85 → 保留累积 ≥ 0.85 的最小集：[0.6, 0.2, 0.1] = 0.9
 控制分布的"陡峭度"：T 越大越平、越随机；T 越小越尖、越确定。
 
 $$
-P_i = \\frac{\\exp(\\text{logit}_i / T)}{\\sum_j \\exp(\\text{logit}_j / T)}
+P_i = \frac{\exp(\text{logit}_i / T)}{\sum_j \exp(\text{logit}_j / T)}
 $$
 
 ### 🛠 代码

@@ -18,7 +18,7 @@ LayerNorm / RMSNorm / BatchNorm，手撕 + 对比。
 对**每个样本的最后一维（特征维）**做归一化：
 
 $$
-y = \\frac{x - \\mu}{\\sqrt{\\sigma^2 + \\epsilon}} \\cdot \\gamma + \\beta
+y = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma + \beta
 $$
 
 ### 🛠 代码
@@ -58,7 +58,7 @@ class LayerNorm(nn.Module):
 LayerNorm 的简化版：去掉减均值、去掉 beta，只用 RMS 归一化。**LLaMA 全系用的就是这个**。
 
 $$
-y = \\frac{x}{\\mathrm{RMS}(x)} \\cdot \\gamma, \\quad \\mathrm{RMS}(x) = \\sqrt{\\frac{1}{d}\\sum x_i^2 + \\epsilon}
+y = \frac{x}{\mathrm{RMS}(x)} \cdot \gamma, \quad \mathrm{RMS}(x) = \sqrt{\frac{1}{d}\sum x_i^2 + \epsilon}
 $$
 
 ### 🛠 代码
@@ -103,7 +103,7 @@ def forward(self, x):
 对**每个特征**在 batch 维度上归一化（CV 常用，NLP 不用）：
 
 $$
-y_j = \\frac{x_j - \\mu_j^{(\\text{batch})}}{\\sqrt{\\sigma_j^{(\\text{batch})2} + \\epsilon}} \\cdot \\gamma_j + \\beta_j
+y_j = \frac{x_j - \mu_j^{(\text{batch})}}{\sqrt{\sigma_j^{(\text{batch})2} + \epsilon}} \cdot \gamma_j + \beta_j
 $$
 
 ### 🛠 代码
