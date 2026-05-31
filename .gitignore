@@ -1,0 +1,13 @@
+.DS_Store
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# mkdocs build output
+site/
+
+# Jupyter
+.ipynb_checkpoints/
