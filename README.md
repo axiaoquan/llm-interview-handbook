@@ -56,8 +56,16 @@
 
 ## 🧠 LLM 手撕
 
-- [Self-Attention from scratch](llm-coding/01-self-attention.md)
-- ⏳ Multi-Head Attention / RoPE / LayerNorm / LoRA / Beam Search / KV Cache / BPE / PPO / DPO
+| 章节 | 内容 |
+|---|---|
+| [01 · Attention](llm-coding/01-attention.md) | Scaled Dot-Product · MHA · Causal · GQA · KV Cache |
+| [02 · Position Encoding](llm-coding/02-position-encoding.md) | Sinusoidal · RoPE · ALiBi |
+| [03 · Normalization](llm-coding/03-normalization.md) | LayerNorm · RMSNorm · Pre/Post-Norm |
+| [04 · Tokenizer](llm-coding/04-tokenizer.md) | BPE 训练 / 编码 / 词频 |
+| [05 · Decoding](llm-coding/05-decoding.md) | Greedy · Top-k · Top-p · Beam Search · 重复惩罚 |
+| [06 · PEFT](llm-coding/06-peft.md) | LoRA · QLoRA · Adapter |
+| [07 · Loss & RL](llm-coding/07-loss-rl.md) | CE · Label Smooth · DPO · PPO · GRPO |
+| [08 · Misc](llm-coding/08-misc.md) | MoE · Flash Attention · Tied Embedding · 梯度技巧 |
 
 ---
 

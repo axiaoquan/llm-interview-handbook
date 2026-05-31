@@ -151,7 +151,37 @@ class Solution:
 
 > [LeetCode 209](https://leetcode.cn/problems/minimum-size-subarray-sum/) · 难度：⭐⭐ · 标签：滑动窗口
 
-⏳ _待补充。核心思路：右指针不断扩展窗口，满足条件后收缩左指针。_
+### 🎯 思路
+
+经典**滑动窗口**：右指针不断右移扩张窗口；当 `sum >= target` 时，左指针右移收缩窗口找最短长度。
+
+> ⚠️ **必须注意**：右指针先右移并把元素加进 sum 之后再判断（这时还无法立刻知道是否符合）。
+
+### 🛠 代码
+
+```python
+class Solution:
+    def minSubArrayLen(self, target: int, nums: list[int]) -> int:
+        n = len(nums)
+        left, total, ans = 0, 0, n + 1
+        for right in range(n):
+            total += nums[right]
+            while total >= target:        # 满足条件，左指针收缩
+                ans = min(ans, right - left + 1)
+                total -= nums[left]
+                left += 1
+        return 0 if ans == n + 1 else ans
+```
+
+### 📊 复杂度
+
+- 时间：**O(n)**（每个元素最多进出窗口一次）
+- 空间：O(1)
+
+### 🪤 易错点
+
+- 初值 `ans` 必须比所有可能答案都大，最后判断"是否找到"
+- 滑动窗口适用前提：**单调性**（扩张时单调增、收缩时单调减），否则不能用（如包含负数的数组求"和为 K"，必须用前缀和+哈希）
 
 ---
 
@@ -159,7 +189,52 @@ class Solution:
 
 > [Kamacoder 1070](https://kamacoder.com/problempage.php?pid=1070) · 难度：⭐⭐ · 标签：前缀和
 
-⏳ _待补充。核心思路：先做一次累加得到 prefix 数组，区间 [l, r] 的和 = prefix[r] - prefix[l-1]。_
+### 🎯 思路
+
+要算区间 $[l, r]$ 的和，**朴素做法**是 $O(n)$ 累加。
+
+**前缀和**：先用 $O(n)$ 算出 `prefix[i] = sum(nums[0..i-1])`，区间和变成 $O(1)$ 查询。
+
+```
+nums   : [1, 2, 3, 3, 2, 1]
+prefix : [0, 1, 3, 6, 9, 11, 12]   ← 多开一位 prefix[0]=0
+```
+
+求区间 $[2, 5]$ 的和：`prefix[6] - prefix[2] = 12 - 3 = 9`。
+
+> ⚠️ 注意 `prefix[r+1] - prefix[l]`，要把"l 之前"减掉。
+
+### 🛠 代码
+
+```python
+n = int(input())
+nums = list(map(int, input().split()))
+
+# 构造 prefix（多开一位避免越界）
+prefix = [0] * (n + 1)
+for i in range(n):
+    prefix[i + 1] = prefix[i] + nums[i]
+
+# 查询区间 [l, r]（0-indexed，闭区间）
+def range_sum(l: int, r: int) -> int:
+    return prefix[r + 1] - prefix[l]
+```
+
+### 📊 复杂度
+
+- 预处理：O(n)
+- 单次查询：**O(1)**
+- 多次查询时优势明显（暴力是 O(nq)）
+
+### 🪤 易错点
+
+- **下标对齐**：`prefix[i]` 表示前 i 个元素之和，长度比 nums 大 1
+- 二维前缀和：`prefix[i+1][j+1] - prefix[i][j+1] - prefix[i+1][j] + prefix[i][j]`（容斥原理）
+
+### 🔗 同类题
+
+- [开发商购买土地](https://kamacoder.com/problempage.php?pid=1044)
+- [和为 K 的子数组](https://leetcode.cn/problems/subarray-sum-equals-k/)（前缀和 + 哈希表，含负数）
 
 ---
 
