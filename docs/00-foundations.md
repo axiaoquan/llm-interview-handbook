@@ -52,6 +52,7 @@ $$
 ### 📖 推导
 
 似然函数：
+
 $$
 L(p) = \prod_{i=1}^{n} p^{x_i}(1-p)^{1-x_i}
 $$
@@ -70,24 +71,27 @@ $$
 ### 🎯 核心定义
 
 **信息熵**（Entropy）：分布 $P$ 自身的不确定性
+
 $$
 H(P) = -\sum_x P(x) \log P(x)
 $$
 
 **交叉熵**（Cross-Entropy）：用分布 $Q$ 编码来自 $P$ 的样本所需平均比特数
+
 $$
 H(P, Q) = -\sum_x P(x) \log Q(x)
 $$
 
 **KL 散度**（Kullback-Leibler）：两个分布的"距离"（不对称）
+
 $$
-D_{KL}(P \| Q) = \sum_x P(x) \log\frac{P(x)}{Q(x)} = H(P, Q) - H(P)
+D_{KL}(P \Vert Q) = \sum_x P(x) \log\frac{P(x)}{Q(x)} = H(P, Q) - H(P)
 $$
 
 ### 📖 关键关系
 
 $$
-H(P, Q) = H(P) + D_{KL}(P \| Q)
+H(P, Q) = H(P) + D_{KL}(P \Vert Q)
 $$
 
 → 当 $P$ 是 ground truth 固定分布时，**最小化交叉熵 ⇔ 最小化 KL 散度**，这就是为什么 LLM 训练用交叉熵损失。
@@ -95,7 +99,7 @@ $$
 ### 🪤 面试常见追问
 
 - **Q：KL 散度对称吗？**
-  A：**不对称**。$D_{KL}(P\|Q) \neq D_{KL}(Q\|P)$。所以严格说不是"距离"。对称化版本叫 JS 散度。
+  A：**不对称**。$D_{KL}(P\VertQ) \neq D_{KL}(Q\VertP)$。所以严格说不是"距离"。对称化版本叫 JS 散度。
 
 - **Q：为什么 LLM next-token 预测用交叉熵？**
   A：等价于最小化预测分布和真实 one-hot 分布的 KL 散度，让模型分布尽量靠近数据分布。
@@ -107,6 +111,7 @@ $$
 ### 🎯 核心要点
 
 **梯度下降**：参数沿损失下降方向更新
+
 $$
 \theta_{t+1} = \theta_t - \eta \nabla_\theta L(\theta_t)
 $$

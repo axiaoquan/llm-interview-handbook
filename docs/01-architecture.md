@@ -74,7 +74,7 @@ Self-Attention 通过 $\mathrm{softmax}(QK^T/\sqrt{d_k})V$ 让序列中每个位
 #### 1. 核心公式
 
 $$
-\mathrm{Attention}(Q,K,V) = \mathrm{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right) V
+\mathrm{Attention}(Q,K,V) = \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right) V
 $$
 
 输入 $X \in \mathbb{R}^{n \times d_{model}}$，三个线性投影得到 $Q, K, V$；
@@ -234,9 +234,11 @@ class MultiHeadAttention(nn.Module):
 - KV Cache 减少 **~93.3%**
 
 **解耦的相对位置编码**：MLA 把 $K$ 分解为
+
 $$
 K_i = K_i^{\text{content}} + K_i^{\text{position}}
 $$
+
 $K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ 直接由位置编码生成，避免对压缩向量做复杂旋转。
 
 ### 🪤 面试常见追问
@@ -260,8 +262,8 @@ Self-Attention 是**置换不变**的——打乱 token 顺序结果不变。所
 #### 1. **正弦位置编码**（原始 Transformer）
 
 $$
-PE(pos, 2i) = \sin\!\left(\frac{pos}{10000^{2i/d}}\right), \quad
-PE(pos, 2i+1) = \cos\!\left(\frac{pos}{10000^{2i/d}}\right)
+PE(pos, 2i) = \sin\left(\frac{pos}{10000^{2i/d}}\right), \quad
+PE(pos, 2i+1) = \cos\left(\frac{pos}{10000^{2i/d}}\right)
 $$
 
 偶数维用 sin、奇数维用 cos，不同维度频率不同（**低维变化快，高维变化慢**）。
@@ -288,6 +290,7 @@ q_m = R_m q, \quad k_n = R_n k
 $$
 
 **关键性质**：
+
 $$
 \langle R_m q,\ R_n k \rangle = q^T R_m^T R_n k = q^T R_{n-m} k
 $$
@@ -345,6 +348,7 @@ $$
 ### 📖 RMSNorm（LLaMA 使用）
 
 LayerNorm 的简化版，去掉均值中心化和偏移 $\beta$：
+
 $$
 \mathrm{RMSNorm}(x) = \frac{x}{\sqrt{\frac{1}{d}\sum_i x_i^2 + \epsilon}} \cdot \gamma
 $$
@@ -437,7 +441,7 @@ $$
 掩码加在 **softmax 之前**：
 
 $$
-\text{attn} = \mathrm{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}} + \mathrm{Mask}\right)
+\text{attn} = \mathrm{softmax}\left(\frac{QK^T}{\sqrt{d_k}} + \mathrm{Mask}\right)
 $$
 
 其中 Mask 上三角部分填 $-\infty$（被屏蔽位置），下三角填 $0$。

@@ -19,11 +19,13 @@
 ### 1) 分类问题：交叉熵损失（CE Loss）
 
 **二分类（BCE）**：
+
 $$
-L = -\big[y \log \hat{y} + (1-y) \log(1-\hat{y})\big]
+L = -[y \log \hat{y} + (1-y) \log(1-\hat{y})]
 $$
 
 **多分类（CCE）** —— LLM next-token prediction 用的就是这个：
+
 $$
 L = -\sum_i y_i \log \hat{y}_i
 $$
@@ -144,9 +146,11 @@ DeepSeek 等使用：
 **解决方案**：
 
 - **梯度裁剪**（Gradient Clipping）：
+
   $$
-  g = \min\!\left(1,\, \frac{c}{\|g\|}\right) \cdot g
+  g = \min\left(1, \frac{c}{\Vertg\Vert}\right) \cdot g
   $$
+
   常见 $c = 1.0$
 - 权重衰减（weight decay）
 - 较小的学习率

@@ -180,6 +180,7 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
 ### 📖 前向过程（加噪）
 
 定义 $T$ 步噪声调度，每步：
+
 $$
 q(x_t \mid x_{t-1}) = \mathcal{N}(x_t; \sqrt{1-\beta_t} x_{t-1}, \beta_t I)
 $$
@@ -189,8 +190,9 @@ $$
 ### 📖 反向过程（去噪）
 
 训练神经网络 $\epsilon_\theta(x_t, t)$ 预测每步加的噪声：
+
 $$
-L = \mathbb{E}_{x_0, t, \epsilon}\!\left[\|\epsilon - \epsilon_\theta(x_t, t)\|^2\right]
+L = \mathbb{E}_{x_0, t, \epsilon}\left[\Vert\epsilon - \epsilon_\theta(x_t, t)\Vert^2\right]
 $$
 
 推理时从纯噪声出发，反向走 $T$ 步生成图像。

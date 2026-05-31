@@ -60,7 +60,7 @@
 ### 📖 PPO 目标函数
 
 $$
-L^{PPO} = \mathbb{E}\!\left[\min\!\left(\frac{\pi_\theta}{\pi_{\theta_{old}}} A_t,\ \mathrm{clip}\!\left(\frac{\pi_\theta}{\pi_{\theta_{old}}}, 1-\epsilon, 1+\epsilon\right) A_t\right)\right]
+L^{PPO} = \mathbb{E}\left[\min\left(\frac{\pi_\theta}{\pi_{\theta_{old}}} A_t,\ \mathrm{clip}\left(\frac{\pi_\theta}{\pi_{\theta_{old}}}, 1-\epsilon, 1+\epsilon\right) A_t\right)\right]
 $$
 
 - $\frac{\pi_\theta}{\pi_{\theta_{old}}}$：重要性采样比
@@ -70,7 +70,7 @@ $$
 ### 📖 总奖励 = RM 分数 - KL 惩罚
 
 $$
-R(x, y) = r_\phi(x, y) - \beta \cdot D_{KL}(\pi_\theta \| \pi_{ref})
+R(x, y) = r_\phi(x, y) - \beta \cdot D_{KL}(\pi_\theta \Vert \pi_{ref})
 $$
 
 KL 惩罚防止策略偏离参考模型太远 → 避免 reward hacking。
@@ -94,6 +94,7 @@ KL 惩罚防止策略偏离参考模型太远 → 避免 reward hacking。
 ### 📖 数据形式
 
 不需要标奖励分数，只需要**偏好对**：
+
 $$
 D = \{(x^{(i)}, y_w^{(i)}, y_l^{(i)})\}_{i=1}^N
 $$
@@ -105,11 +106,13 @@ DPO 一般在**已经做过 SFT 的模型**基础上训练。
 ### 📖 数学推导
 
 从 RLHF 的最优策略出发：
+
 $$
-\pi^*(y \mid x) = \frac{1}{Z(x)} \pi_{ref}(y \mid x) \exp\!\left(\frac{r(x, y)}{\beta}\right)
+\pi^*(y \mid x) = \frac{1}{Z(x)} \pi_{ref}(y \mid x) \exp\left(\frac{r(x, y)}{\beta}\right)
 $$
 
 反解奖励函数：
+
 $$
 r(x, y) = \beta \log \frac{\pi^*(y \mid x)}{\pi_{ref}(y \mid x)} + \beta \log Z(x)
 $$
@@ -118,7 +121,7 @@ $$
 得到 DPO 损失：
 
 $$
-L_{DPO} = -\mathbb{E}\!\left[\log \sigma\!\left(\beta \log\frac{\pi_\theta(y_w \mid x)}{\pi_{ref}(y_w \mid x)} - \beta \log\frac{\pi_\theta(y_l \mid x)}{\pi_{ref}(y_l \mid x)}\right)\right]
+L_{DPO} = -\mathbb{E}\left[\log \sigma\left(\beta \log\frac{\pi_\theta(y_w \mid x)}{\pi_{ref}(y_w \mid x)} - \beta \log\frac{\pi_\theta(y_l \mid x)}{\pi_{ref}(y_l \mid x)}\right)\right]
 $$
 
 ### 📖 关键超参 $\beta$
@@ -156,6 +159,7 @@ DPO 训练只需 **2 个模型**：
 对同一个问题 $x$ 采样一组回答 $\{y_1, \ldots, y_G\}$，给每条打分 $r_i$。
 
 GRPO 的优势估计：
+
 $$
 \hat{A}_i = \frac{r_i - \mathrm{mean}(r_1, \ldots, r_G)}{\mathrm{std}(r_1, \ldots, r_G)}
 $$
