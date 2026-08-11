@@ -243,7 +243,7 @@ L^{CLIP}(\theta)=
 \mathbb{E}_t\left[
 \min\left(
 r_t(\theta)A_t,
-\operatorname{clip}(r_t(\theta),1-\epsilon,1+\epsilon)A_t
+\mathrm{clip}(r_t(\theta),1-\epsilon,1+\epsilon)A_t
 \right)
 \right]
 $$
@@ -357,8 +357,8 @@ $$
 
 $$
 \hat A_i=
-\frac{r_i-\operatorname{mean}(r_1,\ldots,r_G)}
-{\operatorname{std}(r_1,\ldots,r_G)+\varepsilon}
+\frac{r_i-\mathrm{mean}(r_1,\ldots,r_G)}
+{\mathrm{std}(r_1,\ldots,r_G)+\varepsilon}
 $$
 
 | 情况 | Advantage | 训练方向 |
@@ -412,7 +412,7 @@ DAPO（**Decoupled Clip and Dynamic sAmpling Policy Optimization**）不是“DP
 将对称 clipping 拆成不同上下界：
 
 $$
-\operatorname{clip}
+\mathrm{clip}
 \left(r_{i,t}(\theta),
 1-\varepsilon_{low},
 1+\varepsilon_{high}\right),
