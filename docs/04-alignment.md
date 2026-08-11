@@ -80,17 +80,17 @@ Pre-training
 
 对 chosen 回答 $y_w$ 和 rejected 回答 $y_l$：
 
-$$
+```math
 P(y_w \succ y_l \mid x)
 = \sigma\left(r_\phi(x,y_w)-r_\phi(x,y_l)\right)
-$$
+```
 
-$$
+```math
 \mathcal{L}_{RM}
 =-\mathbb{E}\left[
 \log \sigma\left(r_\phi(x,y_w)-r_\phi(x,y_l)\right)
 \right]
-$$
+```
 
 模型通常在最后一个有效 token 的 hidden state 上接一个 scalar head。该损失只约束**分差**，奖励整体加同一个常数不影响偏好概率。
 
@@ -136,7 +136,7 @@ $$
 
 一个抽象的多目标奖励可以写成：
 
-$$
+```math
 R(y)=
 w_cR_{correct}
 +w_pR_{process}
@@ -144,7 +144,7 @@ w_cR_{correct}
 +w_sR_{safety}
 -w_lP_{length}
 -w_hP_{hack}
-$$
+```
 
 这只是结构示意；直接加权前必须处理每个分量的尺度、方差、稀疏度和优先级。
 
@@ -232,13 +232,13 @@ PPO 用 Critic 估计 advantage，并通过 clipped surrogate objective 限制�
 
 ### Clipped objective
 
-$$
+```math
 r_t(\theta)=
 \frac{\pi_\theta(a_t\mid s_t)}
 {\pi_{\theta_{old}}(a_t\mid s_t)}
-$$
+```
 
-$$
+```math
 L^{CLIP}(\theta)=
 \mathbb{E}_t\left[
 \min\left(
@@ -246,19 +246,19 @@ r_t(\theta)A_t,
 \mathrm{clip}(r_t(\theta),1-\epsilon,1+\epsilon)A_t
 \right)
 \right]
-$$
+```
 
 clip 不是把梯度永远限制在固定范围，而是在样本会推动策略越过可信区间时截断其收益，形成保守更新。
 
 ### GAE
 
-$$
+```math
 \delta_t=r_t+\gamma V(s_{t+1})-V(s_t)
-$$
+```
 
-$$
+```math
 \hat A_t^{GAE}=\sum_{l=0}^{T-t-1}(\gamma\lambda)^l\delta_{t+l}
-$$
+```
 
 - $\lambda$ 小：偏差更大、方差更小；
 - $\lambda$ 大：偏差更小、方差更大；
@@ -268,11 +268,11 @@ $$
 
 常见目标：
 
-$$
+```math
 \max_\pi\;
 \mathbb{E}[r(x,y)]
 -\beta D_{KL}(\pi_\theta\Vert\pi_{ref})
-$$
+```
 
 $\beta$ 可固定，也可根据 target KL 自适应调整。KL 太小容易过度优化奖励，太大则几乎学不到新偏好。
 
@@ -293,23 +293,23 @@ $\beta$ 可固定，也可根据 target KL 自适应调整。KL 太小容易过�
 
 KL 正则化奖励最大化的最优策略满足：
 
-$$
+```math
 \pi^*(y\mid x)=
 \frac{1}{Z(x)}\pi_{ref}(y\mid x)
 \exp\left(\frac{r(x,y)}{\beta}\right)
-$$
+```
 
 因此：
 
-$$
+```math
 r(x,y)=
 \beta\log\frac{\pi^*(y\mid x)}{\pi_{ref}(y\mid x)}
 +\beta\log Z(x)
-$$
+```
 
 将其代入 Bradley-Terry 偏好模型，$Z(x)$ 在同一个 prompt 的奖励差中抵消：
 
-$$
+```math
 \mathcal{L}_{DPO}
 =-\mathbb{E}\left[
 \log\sigma\left(
@@ -319,7 +319,7 @@ $$
 \right]
 \right)
 \right]
-$$
+```
 
 ### $\beta$ 到底控制什么？
 
@@ -355,11 +355,11 @@ $$
 
 对 prompt $x$ 采样 $G$ 条回答 $\{y_1,\ldots,y_G\}$，奖励为 $\{r_1,\ldots,r_G\}$：
 
-$$
+```math
 \hat A_i=
 \frac{r_i-\mathrm{mean}(r_1,\ldots,r_G)}
 {\mathrm{std}(r_1,\ldots,r_G)+\varepsilon}
-$$
+```
 
 | 情况 | Advantage | 训练方向 |
 |---|---:|---|
@@ -411,14 +411,14 @@ DAPO（**Decoupled Clip and Dynamic sAmpling Policy Optimization**）不是“DP
 
 将对称 clipping 拆成不同上下界：
 
-$$
+```math
 \mathrm{clip}
 \left(r_{i,t}(\theta),
 1-\varepsilon_{low},
 1+\varepsilon_{high}\right),
 \qquad
 \varepsilon_{high}>\varepsilon_{low}
-$$
+```
 
 更高的上界给低概率 token 增加概率的空间，缓解策略过早确定化。它不是取消约束，而是对“下降”和“探索性上升”使用不对称信任区间。
 
@@ -430,17 +430,17 @@ $$
 
 样本级聚合：
 
-$$
+```math
 \frac{1}{G}\sum_{i=1}^{G}
 \frac{1}{|y_i|}\sum_{t=1}^{|y_i|}g_{i,t}
-$$
+```
 
 token 级聚合：
 
-$$
+```math
 \frac{1}{\sum_i|y_i|}
 \sum_{i=1}^{G}\sum_{t=1}^{|y_i|}g_{i,t}
-$$
+```
 
 前者每条回答等权，后者 batch 内每个 token 等权。它改变了长短回答对梯度的相对贡献，不能简单理解成更细粒度的 token reward。
 
@@ -463,27 +463,27 @@ $$
 
 GRPO / PPO 风格目标通常计算 token-level ratio：
 
-$$
+```math
 w_{i,t}(\theta)=
-\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}
-{\pi_{old}(y_{i,t}\mid x,y_{i,<t})}
-$$
+\frac{\pi_\theta(y_{i,t}\mid x,y_{i,1:t-1})}
+{\pi_{\mathrm{old}}(y_{i,t}\mid x,y_{i,1:t-1})}
+```
 
 GSPO（Group Sequence Policy Optimization）改为一条回答共享 sequence ratio：
 
-$$
+```math
 s_i(\theta)=
 \left(
 \frac{\pi_\theta(y_i\mid x)}
-{\pi_{old}(y_i\mid x)}
+{\pi_{\mathrm{old}}(y_i\mid x)}
 \right)^{1/|y_i|}
 =
 \exp\left(
 \frac{1}{|y_i|}\sum_t
-\log\frac{\pi_\theta(y_{i,t}\mid x,y_{i,<t})}
-{\pi_{old}(y_{i,t}\mid x,y_{i,<t})}
+\log\frac{\pi_\theta(y_{i,t}\mid x,y_{i,1:t-1})}
+{\pi_{\mathrm{old}}(y_{i,t}\mid x,y_{i,1:t-1})}
 \right)
-$$
+```
 
 直觉：Reward 若是 sequence-level，importance ratio 和 clipping 也在 sequence-level 对齐；长度归一化的几何均值避免序列概率随长度指数缩小。论文还强调它能减轻长序列和 MoE 路由变化带来的训练不稳定。
 
@@ -491,12 +491,12 @@ $$
 
 普通做法先合并多维奖励再组内归一化，不同奖励组合可能坍缩成相同 advantage。GDPO（Group reward-Decoupled Normalization Policy Optimization）对每个奖励维度先独立标准化：
 
-$$
+```math
 \hat A_{i,k}
 =\frac{r_{i,k}-\mu_k}{\sigma_k+\varepsilon},
 \qquad
 A_i=\sum_{k=1}^{K}w_k\hat A_{i,k}
-$$
+```
 
 再做批次级稳定化，从而更完整地保留各维奖励差异。
 
