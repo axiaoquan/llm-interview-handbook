@@ -2,7 +2,7 @@
 
 Attention 全家桶，从最基础到生产级。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · Scaled Dot-Product Attention](#q01--scaled-dot-product-attention)
 - [Q02 · Multi-Head Attention](#q02--multi-head-attention)
@@ -14,10 +14,10 @@ Attention 全家桶，从最基础到生产级。
 
 ## Q01 · Scaled Dot-Product Attention
 
-### 🎯 目标
+### 目标
 实现最核心的 attention：$\mathrm{Attn}(Q,K,V) = \mathrm{softmax}(\frac{QK^T}{\sqrt{d_k}})V$
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -45,7 +45,7 @@ def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0):
     return out, attn
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **为什么除 $\sqrt{d_k}$**：$Q \cdot K$ 是 $d_k$ 项独立同分布之和，方差为 $d_k$；除掉 $\sqrt{d_k}$ 让方差归一化到 1，softmax 不会饱和
 - **`masked_fill` 不是 `mask_fill`**（少一个 d）
@@ -56,10 +56,10 @@ def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0):
 
 ## Q02 · Multi-Head Attention
 
-### 🎯 目标
+### 目标
 把 d_model 切成 h 个头并行算 attention，再 concat 回 d_model。
 
-### 🛠 代码
+### 代码
 
 ```python
 class MultiHeadAttention(nn.Module):
@@ -99,7 +99,7 @@ class MultiHeadAttention(nn.Module):
         return self.W_o(out)
 ```
 
-### 📊 形状变化（必背！）
+### 形状变化（必背！）
 
 ```
 x_q:   [B, L_q, d_model]
@@ -114,7 +114,7 @@ attn = softmax(scores) @ V:               [B, h, L_q, d_k]
 .contiguous().view(B, L_q, d_model):      [B, L_q, d_model]  ← 必须 contiguous 否则 view 报错
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **`.transpose` 后必须 `.contiguous()` 才能 `.view`**——否则报错，因为 transpose 不改 storage
 2. **mask 的形状要能广播**：`[B, 1, L_q, L_k]` → 复制到所有头
@@ -125,10 +125,10 @@ attn = softmax(scores) @ V:               [B, h, L_q, d_k]
 
 ## Q03 · Causal (Masked) Attention
 
-### 🎯 目标
+### 目标
 LLM decoder 必须的：第 i 个位置只能看到 0..i，不能偷看未来。
 
-### 🛠 代码（生成 mask）
+### 代码（生成 mask）
 
 ```python
 def causal_mask(L: int, device='cpu'):
@@ -143,7 +143,7 @@ mask = causal_mask(L)                       # [L, L]
 scores = scores.masked_fill(~mask, float('-inf'))
 ```
 
-### 🛠 高效实现：用 PyTorch 内置
+### 高效实现：用 PyTorch 内置
 
 ```python
 # PyTorch 2.0+ 内置了 causal flag
@@ -151,7 +151,7 @@ out = F.scaled_dot_product_attention(Q, K, V, is_causal=True)
 # 它内部用 Flash Attention 加速，不需要显式构造 [L, L] mask
 ```
 
-### 🪤 易错点
+### 易错点
 
 - 训练时 causal mask 是**整个序列一次性算**；推理时配合 KV Cache 是**一次一步**，不需要 mask（因为只算最后一个 token 对前面的 attention）
 - **不要把 padding mask 跟 causal mask 搞混**：padding mask 是把 `<pad>` 位置屏蔽，causal mask 是屏蔽未来；两个要**逻辑与**结合
@@ -167,10 +167,10 @@ combined = causal & pad                                    # [B, 1, L, L] 通过
 
 ## Q04 · Grouped-Query Attention (GQA)
 
-### 🎯 目标
+### 目标
 多个 Q 头共享一组 KV 头（介于 MHA 和 MQA 之间），省 KV Cache 显存。
 
-### 🛠 代码
+### 代码
 
 ```python
 class GroupedQueryAttention(nn.Module):
@@ -208,7 +208,7 @@ class GroupedQueryAttention(nn.Module):
         return self.W_o(out)
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **`repeat_interleave` vs `repeat`**：前者是"AAABBB"，后者是"ABCABC"。GQA 要前者（保持组内 Q 头连续）
 - **KV Cache 显存节省**：从 `n_q_heads × L × d_k` 降到 `n_kv_heads × L × d_k`，比例 = `n_kv_heads / n_q_heads`
@@ -218,10 +218,10 @@ class GroupedQueryAttention(nn.Module):
 
 ## Q05 · KV Cache 推理加速
 
-### 🎯 目标
+### 目标
 推理时只对**新 token** 计算 Q，复用之前的 K、V，避免重复算 prefix。
 
-### 🛠 代码
+### 代码
 
 ```python
 class CachedAttention(nn.Module):
@@ -269,7 +269,7 @@ class CachedAttention(nn.Module):
         return self.W_o(out), kv_cache
 ```
 
-### 🛠 推理循环示例
+### 推理循环示例
 
 ```python
 @torch.no_grad()
@@ -290,13 +290,13 @@ def generate(model, prompt_ids, max_new_tokens=50):
     return torch.cat([prompt_ids, *out_ids], dim=1)
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **位置编码要小心**：用 RoPE 时，新 token 的位置 = `L_past + i`，不能从 0 重新编
 - **显存增长**：KV Cache 大小 = `2 × n_layers × n_kv_heads × L × d_k × dtype`，长上下文很恐怖（GQA / MQA / PagedAttention 就是为了解决这个）
 - **batch 维度的 pad**：批量推理时不同样本进度不同，需要在每步把已完成的样本剔除（continuous batching）
 
-### 📊 性能对比
+### 性能对比
 
 ```
 没有 KV Cache：每生成一个 token，重算整个 [L, L] attention → O(L²)/token

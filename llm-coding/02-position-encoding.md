@@ -2,7 +2,7 @@
 
 位置编码三大主流方案：Sinusoidal（原 Transformer）、RoPE（LLaMA/Qwen）、ALiBi（BLOOM）。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · Sinusoidal Position Encoding](#q01--sinusoidal-position-encoding)
 - [Q02 · RoPE (Rotary Position Embedding)](#q02--rope-rotary-position-embedding)
@@ -12,7 +12,7 @@
 
 ## Q01 · Sinusoidal Position Encoding
 
-### 🎯 目标
+### 目标
 
 原 Transformer 论文里的固定位置编码：
 
@@ -21,7 +21,7 @@ PE_{(pos, 2i)} = \sin\left(\frac{pos}{10000^{2i/d}}\right), \quad
 PE_{(pos, 2i+1)} = \cos\left(\frac{pos}{10000^{2i/d}}\right)
 $$
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -43,7 +43,7 @@ def sinusoidal_pe(max_len: int, d_model: int):
 x = token_emb + sinusoidal_pe(L, d_model)[:L].to(x.device)
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **数值稳定**：直接算 `10000^(2i/d)` 大 d 时溢出，用 `exp(log)` 形式
 - **不同维度频率不同**：低维变化快、高维变化慢，让模型同时感知短距离和长距离
@@ -53,7 +53,7 @@ x = token_emb + sinusoidal_pe(L, d_model)[:L].to(x.device)
 
 ## Q02 · RoPE (Rotary Position Embedding)
 
-### 🎯 目标
+### 目标
 
 把位置 m 的 query/key 通过**旋转矩阵**编码：
 
@@ -63,7 +63,7 @@ $$
 
 旋转后，attention 的内积 $\tilde{q}_m^T \tilde{k}_n$ **只跟相对位置 (m-n) 有关**。
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -117,7 +117,7 @@ def apply_rope(q, k, cos, sin, position_ids=None):
 # 然后正常算 attention
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **只对 Q、K 做 RoPE，不对 V**——V 不参与位置敏感的内积
 2. **`rotate_half` 不是 element-wise 反**：是把后半段移到前面并取负
@@ -125,7 +125,7 @@ def apply_rope(q, k, cos, sin, position_ids=None):
 4. **外推能力**：直接超过训练长度会崩，需要 NTK-aware / YaRN 调整 base
 5. **base 选择**：默认 10000，长上下文模型用 500000 或 1000000（LLaMA-3.1）
 
-### 📊 形状追踪
+### 形状追踪
 
 ```
 q:                          [B, h, L, d_k]
@@ -139,7 +139,7 @@ q_embed:                    [B, h, L, d_k]
 
 ## Q03 · ALiBi (Attention with Linear Biases)
 
-### 🎯 目标
+### 目标
 
 不改 Q、K，直接在 attention 分数上**加一个线性偏置**：距离越远扣分越多。
 
@@ -149,7 +149,7 @@ $$
 
 每个头用不同的斜率 $m$（几何级数）。
 
-### 🛠 代码
+### 代码
 
 ```python
 def get_alibi_slopes(n_heads: int):
@@ -186,13 +186,13 @@ scores = scores + alibi_bias(n_heads, L, device=scores.device)
 # 然后 softmax / mask 等正常流程
 ```
 
-### 🪤 易错点
+### 易错点
 
 - ALiBi **不需要任何位置 embedding 加在输入上**，完全靠 attention bias
 - **外推性**：训练 2K 上下文，推理 16K 也基本不退化（这是 ALiBi 的核心卖点）
 - **斜率的几何级数**：`m_h = 2^(-8h/H)`，不同头有不同感知尺度
 
-### 📊 三种位置编码对比
+### 三种位置编码对比
 
 | 维度 | Sinusoidal | RoPE | ALiBi |
 |---|---|---|---|

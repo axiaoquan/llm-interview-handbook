@@ -1,6 +1,6 @@
 # 02 · LinkedList 链表
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 移除链表元素](#q01--移除链表元素)
@@ -48,7 +48,7 @@ class ListNode:
 
 > [LeetCode 203](https://leetcode.cn/problems/remove-linked-list-elements/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 #### 解法一：虚拟头结点
 
@@ -65,7 +65,7 @@ dummy → head → ... → tail
 - 头结点值 == val → 直接返回 `removeElements(head.next, val)`
 - 头结点值 != val → `head.next = removeElements(head.next, val)`，返回 head
 
-### 🛠 代码
+### 代码
 
 ```python
 # 虚拟头结点
@@ -93,12 +93,12 @@ class Solution:
         return head
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：O(n)
 - 空间：迭代 O(1) / 递归 O(n)
 
-### 🪤 易错点
+### 易错点
 
 - 不能直接 `cur = cur.next`，需要判断 cur.next.val 才能决定是否跳过
 - 递归终止条件别漏 `head is None`
@@ -109,7 +109,7 @@ class Solution:
 
 > [LeetCode 707](https://leetcode.cn/problems/design-linked-list/) · 难度：⭐⭐⭐
 
-### 🎯 思路
+### 思路
 
 **双向链表**应同时维护：
 - `head`（头结点）
@@ -118,7 +118,7 @@ class Solution:
 
 确保增删查 O(1)（边界）/ O(n)（中间）。
 
-### 📖 关键操作要点
+### 关键操作要点
 
 | 操作 | 注意点 |
 |---|---|
@@ -129,7 +129,7 @@ class Solution:
 | 删除头结点 | 判断新头是否存在，否则 tail = None |
 | 删除尾结点 | 判断新尾是否存在，否则 head = None |
 
-### 🪤 总结
+### 总结
 
 1. **前后指针要同时更新**
 2. 所有操作考虑**空链表 / 单节点**特殊情况
@@ -141,7 +141,7 @@ class Solution:
 
 > [LeetCode 206](https://leetcode.cn/problems/reverse-linked-list/) · 难度：⭐⭐ · 标签：双指针 / 递归
 
-### 🎯 思路
+### 思路
 
 **双指针法**：cur 是当前结点，pre 是前一个（初始 None）。
 
@@ -152,7 +152,7 @@ class Solution:
 
 最终返回 pre。
 
-### 🛠 代码
+### 代码
 
 ```python
 # 双指针
@@ -180,12 +180,12 @@ class Solution:
         return self.reverse(tmp, cur)
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：O(n)
 - 空间：迭代 O(1) / 递归 O(n)
 
-### 🪤 易错点
+### 易错点
 
 - **必须先暂存 cur.next**，否则修改 cur.next 后丢失后续
 - 返回的是 **pre**（而不是 cur，cur 最后是 None）
@@ -196,7 +196,7 @@ class Solution:
 
 > [LeetCode 24](https://leetcode.cn/problems/swap-nodes-in-pairs/) · 难度：⭐⭐ · 标签：虚拟头
 
-### 🎯 思路
+### 思路
 
 用**虚拟头结点**简化，循环条件 `cur.next` 和 `cur.next.next` 都不为空。
 
@@ -206,7 +206,7 @@ class Solution:
 cur → 1 → 2 → 3 → ...     变成     cur → 2 → 1 → 3 → ...
 ```
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -226,7 +226,7 @@ class Solution:
         return dummy.next
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：O(n)
 - 空间：O(1)
@@ -237,7 +237,7 @@ class Solution:
 
 > [LeetCode 19](https://leetcode.cn/problems/remove-nth-node-from-end-of-list/) · 难度：⭐⭐ · 标签：快慢指针
 
-### 🎯 思路
+### 思路
 
 **快慢指针**构造一个长度为 n 的"滑动窗口"：
 
@@ -258,7 +258,7 @@ class Solution:
         return dummy.next
 ```
 
-### 🪤 易错点
+### 易错点
 
 - 用虚拟头时 fast 走 n+1 步（让 slow 停在待删除结点的**前一个**）
 - 不用虚拟头时 fast 先走 n 步，slow 停在待删除结点本身（不好处理头结点删除）
@@ -269,7 +269,7 @@ class Solution:
 
 > [面试题 02.07](https://leetcode.cn/problems/intersection-of-two-linked-lists-lcci/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 **长度差 + 双指针**：
 
@@ -277,7 +277,7 @@ class Solution:
 2. 长链表先走 n 步
 3. 两指针同时走，相等就是交点
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -302,7 +302,7 @@ class Solution:
         return headA
 ```
 
-### 📖 优雅解法（双指针拼接）
+### 优雅解法（双指针拼接）
 
 ```python
 def getIntersectionNode(headA, headB):
@@ -321,7 +321,7 @@ def getIntersectionNode(headA, headB):
 
 > [LeetCode 142](https://leetcode.cn/problems/linked-list-cycle-ii/) · 难度：⭐⭐⭐ · 标签：快慢指针 / 数学推导
 
-### 🎯 拆成两个问题
+### 拆成两个问题
 
 #### 1. 判断是否有环
 
@@ -348,7 +348,7 @@ $$
 **关键**：当 $n = 1$ 时 $x = z$。意味着：
 > 假设一个指针从头出发，另一个从相遇点出发，**速度都为 1**，必定在**环的入口**相遇。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -364,7 +364,7 @@ class Solution:
         return None
 ```
 
-### 🪤 为什么 slow 不会在环里走超过一圈才相遇？
+### 为什么 slow 不会在环里走超过一圈才相遇？
 
 - slow 进环时 fast 已经在环里
 - 假设 slow 走完一圈，fast 走了两圈 → 必定追上或刚好追上 slow

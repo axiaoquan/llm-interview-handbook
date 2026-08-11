@@ -2,7 +2,7 @@
 
 BPE（Byte-Pair Encoding）是现代 LLM 分词器的基石（GPT/LLaMA/Qwen 都是 BPE 变种）。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · BPE 训练（学合并规则）](#q01--bpe-训练学合并规则)
 - [Q02 · BPE 编码（用规则切词）](#q02--bpe-编码用规则切词)
@@ -12,7 +12,7 @@ BPE（Byte-Pair Encoding）是现代 LLM 分词器的基石（GPT/LLaMA/Qwen 都
 
 ## Q01 · BPE 训练（学合并规则）
 
-### 🎯 目标
+### 目标
 
 从语料里学出"出现频率最高的字符对依次合并"的规则列表。
 
@@ -22,7 +22,7 @@ BPE（Byte-Pair Encoding）是现代 LLM 分词器的基石（GPT/LLaMA/Qwen 都
 重复 k 次得到 k 条合并规则
 ```
 
-### 🛠 代码（教学版）
+### 代码（教学版）
 
 ```python
 from collections import Counter
@@ -83,7 +83,7 @@ for pair in merges:
     print(' + '.join(pair))
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **`</w>` 词尾标记**：区分 "est" 在词中（`lowest`）和词尾（`newest</w>`），让模型知道边界
 - **GPT-2 的优化**：直接在 byte 级别做 BPE（256 个起始符号），完美处理任何 Unicode 字符
@@ -93,11 +93,11 @@ for pair in merges:
 
 ## Q02 · BPE 编码（用规则切词）
 
-### 🎯 目标
+### 目标
 
 给定输入字符串，根据训练好的 merges 列表把它切成 token。
 
-### 🛠 代码
+### 代码
 
 ```python
 def encode_word(word: str, merges: List[Tuple[str, str]]) -> List[str]:
@@ -135,7 +135,7 @@ result = encode("lowest newest", merges)
 # 可能输出：['low', 'est</w>', 'new', 'est</w>']
 ```
 
-### 🪤 高效实现：贪心 + priority queue
+### 高效实现：贪心 + priority queue
 
 朴素实现是 O(n × num_merges)，工业级用 priority queue：
 
@@ -157,7 +157,7 @@ def encode_word_fast(word, merge_ranks: dict):
     return tokens
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **合并顺序很重要**：先学的优先级更高（rank 小），不能乱序应用
 2. **未知字符**：用 byte-level BPE 就不会有 OOV
@@ -167,7 +167,7 @@ def encode_word_fast(word, merge_ranks: dict):
 
 ## Q03 · 词频统计与 vocab 构建
 
-### 🛠 完整流程
+### 完整流程
 
 ```python
 def build_vocab(corpus_file: str, num_merges: int = 30000):
@@ -196,7 +196,7 @@ def build_vocab(corpus_file: str, num_merges: int = 30000):
     return merges, token_to_id
 ```
 
-### 📊 主流模型 tokenizer 对比
+### 主流模型 tokenizer 对比
 
 | 模型 | 算法 | vocab size | 中文友好 |
 |---|---|---|---|
@@ -206,7 +206,7 @@ def build_vocab(corpus_file: str, num_merges: int = 30000):
 | Qwen-2 | BPE + 中文优化 | 151936 | 好（一个汉字 ≈ 1 token） |
 | Tiktoken (GPT-4) | BPE | 100256 | 较好 |
 
-### 🪤 中文 LLM 的特殊处理
+### 中文 LLM 的特殊处理
 
 - **预分词器**：先用 jieba / sentencepiece 做粗切分，再 BPE 细化
 - **byte fallback**：未在 vocab 里的字符回退到 byte 级（保证 100% 编码成功）

@@ -1,6 +1,6 @@
 # 03 · HashTable 哈希表
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 有效的字母异位词](#q01--有效的字母异位词)
@@ -52,13 +52,13 @@
 
 > [LeetCode 242](https://leetcode.cn/problems/valid-anagram/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 字符是 26 个小写字母 → 用**长度 26 的数组**作为哈希表。
 
 s 中字符 +1，t 中字符 -1，最后数组**全为 0** 即 anagram。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -73,12 +73,12 @@ class Solution:
         return all(x == 0 for x in record)
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n)**
 - 空间：O(1)（常数 26）
 
-### 🔗 同类题
+### 同类题
 
 - [赎金信](https://leetcode.cn/problems/ransom-note/)
 
@@ -88,11 +88,11 @@ class Solution:
 
 > [LeetCode 1002](https://leetcode.cn/problems/find-common-characters/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 用第一个字符串初始化哈希表，对后续每个字符串计算其哈希表，**与现有哈希表逐位取最小**。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -116,7 +116,7 @@ class Solution:
 
 > [LeetCode 349](https://leetcode.cn/problems/intersection-of-two-arrays/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 数值有限范围（题目限定 0~1000）→ 数组哈希。
 
@@ -135,7 +135,7 @@ class Solution:
 return list(set(nums1) & set(nums2))
 ```
 
-### 🔗 同类题
+### 同类题
 
 - [快乐数](https://leetcode.cn/problems/happy-number/)（用 set 判断是否进入循环）
 
@@ -145,7 +145,7 @@ return list(set(nums1) & set(nums2))
 
 > [LeetCode 202](https://leetcode.cn/problems/happy-number/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 求各位平方和，若进入循环就不是 happy number。**用 set 检测重复数字**。
 
@@ -172,13 +172,13 @@ class Solution:
 
 > [LeetCode 1](https://leetcode.cn/problems/two-sum/) · 难度：⭐⭐ · 标签：哈希表
 
-### 🎯 思路
+### 思路
 
 遍历到某元素时，需要查询**之前所有元素**是否有 `target - x` → **哈希表 O(n)**。
 
 哈希表结构：`{value: index}`（既要值又要下标 → **map**）。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -190,7 +190,7 @@ class Solution:
             seen[x] = i
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **先查后存**，否则同一元素自己和自己相加可能算一对
 - 题目保证一定有解 → 不用考虑 not found
@@ -201,7 +201,7 @@ class Solution:
 
 > [LeetCode 454](https://leetcode.cn/problems/4sum-ii/) · 难度：⭐⭐⭐
 
-### 🎯 思路
+### 思路
 
 把 4 个数组拆成 **(A, B) + (C, D)** 两组：
 
@@ -210,7 +210,7 @@ class Solution:
 
 → 时间从 $O(n^4)$ 降到 $O(n^2)$。
 
-### 🛠 代码
+### 代码
 
 ```python
 from collections import defaultdict
@@ -234,11 +234,11 @@ class Solution:
 
 > [LeetCode 15](https://leetcode.cn/problems/3sum/) · 难度：⭐⭐⭐ · 标签：双指针
 
-### 🎯 为什么不用哈希？
+### 为什么不用哈希？
 
 三元组**不能重复**，去重在哈希里很麻烦 → 用**排序 + 双指针**。
 
-### 📖 算法
+### 算法
 
 1. 数组排序
 2. 遍历 i：
@@ -249,7 +249,7 @@ class Solution:
    - 三数和 < 0 → left++
    - 三数和 == 0 → 记录，**同时移动 left/right 并去重**
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -277,12 +277,12 @@ class Solution:
         return ans
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n²)**
 - 空间：O(1)（不计输出）
 
-### 🪤 易错点（三处去重）
+### 易错点（三处去重）
 
 1. 外层 i 去重：`if i > 0 and nums[i] == nums[i-1]`
 2. 找到一组解后，l 去重：`while l < r and nums[l] == nums[l+1]: l+=1`
@@ -294,14 +294,14 @@ class Solution:
 
 > [LeetCode 18](https://leetcode.cn/problems/4sum/) · 难度：⭐⭐⭐
 
-### 🎯 思路
+### 思路
 
 四数之和 = 两层循环 + 双指针，套娃在三数之和外。
 
 **剪枝注意**：因为目标 target 可能为负，简单的 `nums[i] > target` **不能直接 break**。
 正确剪枝：`if nums[i] > target and target >= 0` 或者 `if nums[i] > target and nums[i] >= 0`。
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n³)**
 - 空间：O(1)

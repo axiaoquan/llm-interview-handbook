@@ -1,6 +1,6 @@
 # 08 · MonotonicStack 单调栈
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 每日温度](#q01--每日温度)
@@ -30,12 +30,12 @@
 
 > [LeetCode 739](https://leetcode.cn/problems/daily-temperatures/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 求每个温度等待几天后才有更高温度。
 **栈中存日期下标**，遇到更高温度时弹出栈顶并算差值。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -50,7 +50,7 @@ class Solution:
         return ans
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n)**（每元素最多进出一次）
 - 空间：O(n)
@@ -61,7 +61,7 @@ class Solution:
 
 > [LeetCode 496](https://leetcode.cn/problems/next-greater-element-i/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 先用单调栈求 nums2 中每个元素的"下一个更大"，存入哈希表；再遍历 nums1 直接查。
 
@@ -83,7 +83,7 @@ class Solution:
 
 > [LeetCode 503](https://leetcode.cn/problems/next-greater-element-ii/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 **环形数组** → 把数组拼接两倍长（用 `i % n` 模），再跑单调栈。
 
@@ -108,7 +108,7 @@ class Solution:
 
 > [LeetCode 42](https://leetcode.cn/problems/trapping-rain-water/) · 难度：⭐⭐⭐⭐
 
-### 🎯 三种解法
+### 三种解法
 
 #### 1) 双指针（最优）
 
@@ -150,13 +150,13 @@ class Solution:
 
 > [LeetCode 84](https://leetcode.cn/problems/largest-rectangle-in-histogram/) · 难度：⭐⭐⭐⭐
 
-### 🎯 思路
+### 思路
 
 **单调递增栈**：栈顶 ↘ 栈底单调递减；遇到更小元素弹栈顶时，把它当矩形的高 h，弹后栈顶为左边界，当前 i 为右边界，面积 `h * (right - left - 1)`。
 
 > ⚠️ **数组两侧补 0** 简化边界处理。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -173,7 +173,7 @@ class Solution:
         return ans
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n)**
 - 空间：O(n)

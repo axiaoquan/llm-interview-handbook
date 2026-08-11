@@ -1,4 +1,4 @@
-# 💻 算法手撕 · Algorithm Notes
+# 算法手撕 · Algorithm Notes
 
 数据结构与通用算法刷题笔记。基于 [代码随想录](https://programmercarl.com/) + LeetCode Hot100 整理。
 

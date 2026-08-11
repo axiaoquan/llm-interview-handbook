@@ -1,4 +1,4 @@
-# 🧠 LLM 手撕题集 · LLM Coding Drills
+# LLM 手撕题集 · LLM Coding Drills
 
 LLM 模型组件的**纯 PyTorch 手撕代码**，跟 [`docs/`](../docs/) 原理章节互为补充。
 
@@ -8,7 +8,7 @@ LLM 模型组件的**纯 PyTorch 手撕代码**，跟 [`docs/`](../docs/) 原理
 
 ---
 
-## 📚 章节目录
+## 章节目录
 
 | 章节 | 内容 |
 |---|---|
@@ -18,12 +18,12 @@ LLM 模型组件的**纯 PyTorch 手撕代码**，跟 [`docs/`](../docs/) 原理
 | [04 · Tokenizer](04-tokenizer.md) | BPE 训练 · 编码 · 解码 |
 | [05 · Decoding](05-decoding.md) | Greedy · Top-k · Top-p · Beam Search · 重复惩罚 |
 | [06 · PEFT](06-peft.md) | LoRA · QLoRA Linear · Adapter |
-| [07 · Loss & RL](07-loss-rl.md) | Cross-Entropy · DPO Loss · PPO Loss · GRPO |
+| [07 · Loss & RL](07-loss-rl.md) | CE · DPO · PPO · GRPO · Reward Model · 多奖励归一化 |
 | [08 · Misc](08-misc.md) | MoE 路由 · Flash Attention 简化版 · Mixture of Depths |
 
 ---
 
-## 🎯 使用建议
+## 使用建议
 
 每题都有 4 部分：
 

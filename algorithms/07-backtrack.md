@@ -1,6 +1,6 @@
 # 07 · Backtrack 回溯
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 组合](#q01--组合)
@@ -51,7 +51,7 @@ def backtrack(参数):
 
 > [LeetCode 77](https://leetcode.cn/problems/combinations/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 从 [1, n] 选 k 个组合。用 `start` 控制不重复。
 
@@ -72,7 +72,7 @@ class Solution:
         return ans
 ```
 
-### 🪤 剪枝点
+### 剪枝点
 
 - 剩余元素 < 还需要的个数 → 跳过
 - `n - (k - len(path)) + 1` 是最大可行起点
@@ -81,7 +81,7 @@ class Solution:
 
 ## Q02 · 组合总和系列
 
-### 📖 组合总和（可重复用）
+### 组合总和（可重复用）
 
 > [LeetCode 39](https://leetcode.cn/problems/combination-sum/)
 
@@ -103,7 +103,7 @@ def combinationSum(candidates, target):
     return ans
 ```
 
-### 📖 组合总和 II（每个用一次 + 去重）
+### 组合总和 II（每个用一次 + 去重）
 
 > [LeetCode 40](https://leetcode.cn/problems/combination-sum-ii/)
 
@@ -120,7 +120,7 @@ if i > start and candidates[i] == candidates[i-1]:
 
 > [LeetCode 131](https://leetcode.cn/problems/palindrome-partitioning/) · 难度：⭐⭐⭐
 
-### 🎯 思路
+### 思路
 
 切割问题 ≈ 组合问题。`start` 表示下一段的起点。
 
@@ -148,7 +148,7 @@ class Solution:
 
 > [LeetCode 78](https://leetcode.cn/problems/subsets/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 子集问题 = **每个节点都收集**（不只是叶子）。
 
@@ -172,7 +172,7 @@ class Solution:
 
 > [LeetCode 46](https://leetcode.cn/problems/permutations/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 排列**有顺序** → 不能用 startIndex，每次都从头遍历，用 `used[]` 标记已用。
 
@@ -195,7 +195,7 @@ class Solution:
         return ans
 ```
 
-### 📖 排列 II（含重复）
+### 排列 II（含重复）
 
 `used[i-1] == False` 表示同一层先前选过的相同元素已回溯 → **跳过**。
 
@@ -210,7 +210,7 @@ if i > 0 and nums[i] == nums[i-1] and not used[i-1]:
 
 > [LeetCode 51](https://leetcode.cn/problems/n-queens/) · 难度：⭐⭐⭐⭐
 
-### 🎯 思路
+### 思路
 
 按行回溯，对每行尝试每一列，检查不同行/列/斜线冲突。
 

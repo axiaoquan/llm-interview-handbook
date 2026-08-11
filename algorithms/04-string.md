@@ -1,6 +1,6 @@
 # 04 · String 字符串
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 反转字符串](#q01--反转字符串)
@@ -124,7 +124,7 @@ print(''.join(s))
 
 > [LeetCode 28](https://leetcode.cn/problems/find-the-index-of-the-first-occurrence-in-a-string/) · 难度：⭐⭐⭐
 
-### 🎯 核心思想
+### 核心思想
 
 字符不匹配时，**根据已匹配的文本跳过**部分位置，避免重复匹配。
 
@@ -137,7 +137,7 @@ next:    0 1 0 1 2 0
 
 匹配到 f（下标 5）失败 → 跳到 next[4] = 2 的位置继续。
 
-### 📖 求前缀表
+### 求前缀表
 
 **核心**：先判断要不要回退（while），再判断字符是否相等。
 
@@ -154,7 +154,7 @@ def build_next(needle):
     return nxt
 ```
 
-### 📖 KMP 匹配
+### KMP 匹配
 
 ```python
 class Solution:
@@ -173,12 +173,12 @@ class Solution:
         return -1
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n + m)**（朴素是 O(nm)）
 - 空间：O(m)
 
-### 🪤 易错点
+### 易错点
 
 - `j = nxt[j-1]`，**不是 nxt[j]**
 - while 是回退多次，不是 if
@@ -189,7 +189,7 @@ class Solution:
 
 > [LeetCode 459](https://leetcode.cn/problems/repeated-substring-pattern/) · 难度：⭐⭐
 
-### 🎯 解法一：移动匹配
+### 解法一：移动匹配
 
 `(s + s)[1:-1]` 中如果还能找到 s，说明 s 由重复子串组成。
 
@@ -199,7 +199,7 @@ class Solution:
         return s in (s + s)[1:-1]
 ```
 
-### 🎯 解法二：KMP 前缀表
+### 解法二：KMP 前缀表
 
 如果 s 由重复子串组成，**最长相等前后缀不包含的部分**一定是最小重复子串。
 

@@ -1,6 +1,6 @@
 # 01 · Array 数组
 
-## 📑 本章目录
+## 本章目录
 
 ### 章节核心
 - [基础知识](#基础知识)
@@ -38,7 +38,7 @@
 
 > [LeetCode 704](https://leetcode.cn/problems/binary-search/) · 难度：⭐⭐ · 标签：二分查找
 
-### 🎯 思路
+### 思路
 
 二分查找一般用于**无重复元素的有序数组**（若有重复，下标可能不唯一）。
 
@@ -54,7 +54,7 @@
 
 只要在每次循环中**始终维持当初定义的不变量**，就不会出问题。
 
-### 🛠 代码
+### 代码
 
 #### 左闭右闭写法
 
@@ -90,12 +90,12 @@ class Solution:
         return -1
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(log n)**
 - 空间：O(1)
 
-### 🪤 易错点
+### 易错点
 
 - `mid = (left + right) // 2` 在某些语言可能溢出，更稳的写法 `left + (right - left) // 2`
 - 边界条件必须跟区间定义匹配，**不能两种写法混搭**
@@ -107,7 +107,7 @@ class Solution:
 
 > [LeetCode 27](https://leetcode.cn/problems/remove-element/) · 难度：⭐⭐ · 标签：双指针 / 数组
 
-### 🎯 思路
+### 思路
 
 数组的"删除"不是真删，而是**把后续元素往前移**，直接做法是 O(n²)。
 
@@ -121,7 +121,7 @@ class Solution:
  fast 找到非 3 的元素 → 写入 slow → slow++
 ```
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -134,12 +134,12 @@ class Solution:
         return slow
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n)**（暴力是 O(n²)）
 - 空间：O(1)（原地修改）
 
-### 🪤 易错点
+### 易错点
 
 - 慢指针的 `slow` 是**最终长度**，所以 return 它而不是数组
 - 快慢指针不要写反方向
@@ -151,13 +151,13 @@ class Solution:
 
 > [LeetCode 209](https://leetcode.cn/problems/minimum-size-subarray-sum/) · 难度：⭐⭐ · 标签：滑动窗口
 
-### 🎯 思路
+### 思路
 
 经典**滑动窗口**：右指针不断右移扩张窗口；当 `sum >= target` 时，左指针右移收缩窗口找最短长度。
 
 > ⚠️ **必须注意**：右指针先右移并把元素加进 sum 之后再判断（这时还无法立刻知道是否符合）。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -173,12 +173,12 @@ class Solution:
         return 0 if ans == n + 1 else ans
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n)**（每个元素最多进出窗口一次）
 - 空间：O(1)
 
-### 🪤 易错点
+### 易错点
 
 - 初值 `ans` 必须比所有可能答案都大，最后判断"是否找到"
 - 滑动窗口适用前提：**单调性**（扩张时单调增、收缩时单调减），否则不能用（如包含负数的数组求"和为 K"，必须用前缀和+哈希）
@@ -189,7 +189,7 @@ class Solution:
 
 > [Kamacoder 1070](https://kamacoder.com/problempage.php?pid=1070) · 难度：⭐⭐ · 标签：前缀和
 
-### 🎯 思路
+### 思路
 
 要算区间 $[l, r]$ 的和，**朴素做法**是 $O(n)$ 累加。
 
@@ -204,7 +204,7 @@ prefix : [0, 1, 3, 6, 9, 11, 12]   ← 多开一位 prefix[0]=0
 
 > ⚠️ 注意 `prefix[r+1] - prefix[l]`，要把"l 之前"减掉。
 
-### 🛠 代码
+### 代码
 
 ```python
 n = int(input())
@@ -220,18 +220,18 @@ def range_sum(l: int, r: int) -> int:
     return prefix[r + 1] - prefix[l]
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 预处理：O(n)
 - 单次查询：**O(1)**
 - 多次查询时优势明显（暴力是 O(nq)）
 
-### 🪤 易错点
+### 易错点
 
 - **下标对齐**：`prefix[i]` 表示前 i 个元素之和，长度比 nums 大 1
 - 二维前缀和：`prefix[i+1][j+1] - prefix[i][j+1] - prefix[i+1][j] + prefix[i][j]`（容斥原理）
 
-### 🔗 同类题
+### 同类题
 
 - [开发商购买土地](https://kamacoder.com/problempage.php?pid=1044)
 - [和为 K 的子数组](https://leetcode.cn/problems/subarray-sum-equals-k/)（前缀和 + 哈希表，含负数）

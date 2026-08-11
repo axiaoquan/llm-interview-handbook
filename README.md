@@ -9,7 +9,7 @@
 
 ---
 
-## 📚 这是什么？
+## 这是什么？
 
 为 **AI / 算法工程师** 准备的结构化面试手册。三个独立的知识体系：
 
@@ -21,7 +21,7 @@
 
 ---
 
-## 🤖 大模型知识
+## 大模型知识
 
 | 章节 | 内容 |
 |---|---|
@@ -29,7 +29,7 @@
 | [01 · Architecture](docs/01-architecture.md) | Transformer / Attention / Position / Norm |
 | [02 · Training](docs/02-training.md) | 损失 / 优化器 / 分布式 / 混合精度 |
 | [03 · Fine-tuning](docs/03-fine-tuning.md) | LoRA / QLoRA / PEFT / 指令微调 |
-| [04 · Alignment](docs/04-alignment.md) | RLHF / PPO / DPO / GRPO |
+| [04 · Post-Training & Alignment](docs/04-alignment.md) | RLHF / Reward / PPO / DPO / GRPO / DAPO / GSPO / GDPO |
 | [05 · Inference](docs/05-inference.md) | KV Cache / Flash Attention / 量化 / 解码 |
 | [06 · RAG](docs/06-rag.md) | 索引 / 检索 / 重排 / 高级 RAG |
 | [07 · Agent](docs/07-agent.md) | ReAct / Tool Use / Multi-Agent |
@@ -38,7 +38,7 @@
 | [10 · System](docs/10-system.md) | 显存计算 / 服务化 / 部署 |
 | [99 · Frontier](docs/99-frontier.md) | DLM / Mamba / o1 推理时扩展 |
 
-## 💻 算法手撕
+## 算法手撕
 
 | 章节 | 内容 |
 |---|---|
@@ -54,7 +54,7 @@
 | [10 · Hot100](algorithms/10-hot100.md) | LeetCode Hot100 重点题 |
 | [99 · Tips](algorithms/99-tips.md) | Python 易错点 / IO 模板 |
 
-## 🧠 LLM 手撕
+## LLM 手撕
 
 | 章节 | 内容 |
 |---|---|
@@ -64,12 +64,12 @@
 | [04 · Tokenizer](llm-coding/04-tokenizer.md) | BPE 训练 / 编码 / 词频 |
 | [05 · Decoding](llm-coding/05-decoding.md) | Greedy · Top-k · Top-p · Beam Search · 重复惩罚 |
 | [06 · PEFT](llm-coding/06-peft.md) | LoRA · QLoRA · Adapter |
-| [07 · Loss & RL](llm-coding/07-loss-rl.md) | CE · Label Smooth · DPO · PPO · GRPO |
+| [07 · Loss & RL](llm-coding/07-loss-rl.md) | CE · DPO · PPO · GRPO · Reward Model · 多奖励归一化 |
 | [08 · Misc](llm-coding/08-misc.md) | MoE · Flash Attention · Tied Embedding · 梯度技巧 |
 
 ---
 
-## 📝 单题模板
+## 单题模板
 
 每题按统一结构组织：
 
@@ -77,21 +77,21 @@
 ## QXX · 题目
 > 难度 / 公司 / 标签
 
-### 🎯 一句话答案 / 思路
-### 📖 详细展开 / 代码
-### 🪤 追问 / 易错点
-### 📚 参考
+### 一句话答案 / 思路
+### 详细展开 / 代码
+### 追问 / 易错点
+### 参考
 ```
 
 模板：[`docs/_TEMPLATE.md`](docs/_TEMPLATE.md) · [`algorithms/_TEMPLATE.md`](algorithms/_TEMPLATE.md)
 
 ---
 
-## 🤝 贡献
+## 贡献
 
 欢迎 Issue / PR，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-## 📄 License
+## License
 
 [MIT](LICENSE)
 

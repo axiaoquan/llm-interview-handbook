@@ -1,6 +1,6 @@
 # 06 · BinaryTree 二叉树
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 二叉树的递归遍历](#q01--二叉树的递归遍历)
@@ -75,7 +75,7 @@ def postorder(root):
 
 ## Q02 · 二叉树的迭代遍历
 
-### 📖 前序（中左右）
+### 前序（中左右）
 
 栈中**先压右后压左**（栈是 LIFO）：
 
@@ -91,7 +91,7 @@ def preorder(root):
     return ans
 ```
 
-### 📖 后序（左右中）
+### 后序（左右中）
 
 前序代码的左右结点压入顺序互换 → 得到「中右左」，最后**反转**结果即为后序。
 
@@ -107,7 +107,7 @@ def postorder(root):
     return ans[::-1]
 ```
 
-### 📖 中序（左中右）
+### 中序（左中右）
 
 中序**访问和处理不同步**，需要辅助指针 `cur`：
 
@@ -130,7 +130,7 @@ def inorder(root):
 
 ## Q03 · 二叉树的统一迭代法
 
-### 🎯 核心思想
+### 核心思想
 
 **用 `None` 标记**待处理结点：
 
@@ -160,7 +160,7 @@ def inorder(root):
 
 > [LeetCode 102](https://leetcode.cn/problems/binary-tree-level-order-traversal/) · 难度：⭐⭐
 
-### 🛠 代码
+### 代码
 
 ```python
 from collections import deque
@@ -181,7 +181,7 @@ class Solution:
         return ans
 ```
 
-### 🔗 同类题
+### 同类题
 
 - 二叉树的层序遍历 II（自底向上）
 - 二叉树的右视图（每层最后一个）
@@ -196,7 +196,7 @@ class Solution:
 
 > [LeetCode 226](https://leetcode.cn/problems/invert-binary-tree/) · 难度：⭐
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -206,7 +206,7 @@ class Solution:
         return root
 ```
 
-### 🪤 易错点
+### 易错点
 
 - ⚠️ **不要用中序遍历**！中序会让有的子树被翻转两次。
 - 前序、后序、层序都可以。
@@ -217,11 +217,11 @@ class Solution:
 
 > [LeetCode 101](https://leetcode.cn/problems/symmetric-tree/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 **后序遍历**——必须先知道左右子树是否对称，才能判断父节点。需要**同步比较两棵子树**。
 
-### 🛠 代码
+### 代码
 
 ```python
 class Solution:
@@ -256,7 +256,7 @@ class Solution:
 
 > [LeetCode 111](https://leetcode.cn/problems/minimum-depth-of-binary-tree/) · 难度：⭐⭐
 
-### 🪤 易错点
+### 易错点
 
 **叶子结点定义**：左右孩子**都为空**才算叶子。
 
@@ -278,7 +278,7 @@ class Solution:
 
 > [LeetCode 222](https://leetcode.cn/problems/count-complete-tree-nodes/) · 难度：⭐⭐⭐
 
-### 🎯 思路（剪枝）
+### 思路（剪枝）
 
 普通方法 O(n)。利用完全二叉树特性可做到 **O(log² n)**。
 
@@ -303,7 +303,7 @@ class Solution:
 
 > [LeetCode 110](https://leetcode.cn/problems/balanced-binary-tree/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 后序求高度，**遇到不平衡就提前返回 -1**（剪枝）。
 
@@ -327,7 +327,7 @@ class Solution:
 
 > [LeetCode 257](https://leetcode.cn/problems/binary-tree-paths/) · 难度：⭐⭐ · 标签：回溯
 
-### 🎯 思路
+### 思路
 
 前序遍历 + 回溯。把"当前路径"作为参数往下传，叶子节点保存结果。
 
@@ -354,7 +354,7 @@ class Solution:
 
 > [LeetCode 404](https://leetcode.cn/problems/sum-of-left-leaves/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 后序遍历。注意**左叶子的判断必须在父节点处判断**：
 
@@ -378,7 +378,7 @@ class Solution:
 
 > [LeetCode 513](https://leetcode.cn/problems/find-bottom-left-tree-value/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 **层序遍历**，最后一层第一个元素即答案。
 

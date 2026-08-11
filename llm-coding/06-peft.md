@@ -2,7 +2,7 @@
 
 参数高效微调：LoRA / QLoRA / Adapter。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · LoRA Linear](#q01--lora-linear)
 - [Q02 · 把 LoRA 注入已有模型](#q02--把-lora-注入已有模型)
@@ -14,7 +14,7 @@
 
 ## Q01 · LoRA Linear
 
-### 🎯 目标
+### 目标
 
 把原 Linear $W \in \mathbb{R}^{d_{out} \times d_{in}}$ 改成：
 
@@ -24,7 +24,7 @@ $$
 
 其中 $A \in \mathbb{R}^{r \times d_{in}}$, $B \in \mathbb{R}^{d_{out} \times r}$，$r$ 远小于 $d$。
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -65,7 +65,7 @@ class LoRALinear(nn.Module):
         return base_out + lora_out * self.scaling
 ```
 
-### 🪤 易错点（必考！）
+### 易错点（必考！）
 
 1. **A 和 B 的初始化绝对不能反**：
    - A 高斯、B 零 → 初始时 BA = 0，模型输出完全等于原模型 ✅
@@ -78,11 +78,11 @@ class LoRALinear(nn.Module):
 
 ## Q02 · 把 LoRA 注入已有模型
 
-### 🎯 目标
+### 目标
 
 给一个已经定义好的模型（比如 GPT），把所有 `nn.Linear` 替换成 LoRALinear，但保留原权重。
 
-### 🛠 代码
+### 代码
 
 ```python
 def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
@@ -121,7 +121,7 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
 # 现在只有 lora_A / lora_B 是 trainable
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **`get_submodule`**：处理嵌套路径（如 `transformer.h.0.attn.q_proj`）的安全访问
 - **target_modules 选哪些**：通常是 `q_proj, v_proj`（原论文）或加 `k_proj, o_proj` 提升效果
@@ -131,11 +131,11 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
 
 ## Q03 · Merge LoRA 权重回原模型
 
-### 🎯 目标
+### 目标
 
 部署时不想多两个矩阵乘法，把 $W' = W + \frac{\alpha}{r} BA$ 合并回去。
 
-### 🛠 代码
+### 代码
 
 ```python
 def merge_lora(model: nn.Module):
@@ -166,7 +166,7 @@ def merge_lora(model: nn.Module):
     return model
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **合并后推理零开销**：完全等价于原模型，只是权重微调过
 - **只能 merge 一次**：merge 之后想再换一份 LoRA，要么从头加载原模型，要么记录 merge 前的 base weight
@@ -176,7 +176,7 @@ def merge_lora(model: nn.Module):
 
 ## Q04 · QLoRA 的 4-bit 量化思路
 
-### 🎯 完整实现太复杂（依赖 bitsandbytes 的 cuda kernel），但核心思想可以手撕
+### 完整实现太复杂（依赖 bitsandbytes 的 cuda kernel），但核心思想可以手撕
 
 ```python
 # 4-bit 量化的关键三步：
@@ -222,7 +222,7 @@ def quantize_int4(weight: torch.Tensor):
     return quantized, scale
 ```
 
-### 🪤 QLoRA 真实工程要点
+### QLoRA 真实工程要点
 
 - **NF4（NormalFloat 4-bit）**：基于权重正态分布的非均匀量化，比 INT4 损失更小
 - **Double Quantization**：把 scale 也量化（节省 0.4 bits/param）
@@ -233,7 +233,7 @@ def quantize_int4(weight: torch.Tensor):
 
 ## Q05 · Adapter Layer
 
-### 🎯 目标
+### 目标
 
 在每个 Transformer block 后插入小的 bottleneck：
 
@@ -241,7 +241,7 @@ def quantize_int4(weight: torch.Tensor):
 输入 → 降维 (d → r) → ReLU → 升维 (r → d) → 残差连接
 ```
 
-### 🛠 代码
+### 代码
 
 ```python
 class Adapter(nn.Module):
@@ -273,7 +273,7 @@ class BlockWithAdapter(nn.Module):
         return self.adapter(self.block(x))
 ```
 
-### 🪤 LoRA vs Adapter
+### LoRA vs Adapter
 
 | 维度 | LoRA | Adapter |
 |---|---|---|

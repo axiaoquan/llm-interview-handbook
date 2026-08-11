@@ -2,7 +2,7 @@
 
 杂项：MoE 路由、Flash Attention 简化版、其他工程小手撕。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · MoE Top-k Routing](#q01--moe-top-k-routing)
 - [Q02 · MoE 负载均衡 Loss](#q02--moe-负载均衡-loss)
@@ -14,11 +14,11 @@
 
 ## Q01 · MoE Top-k Routing
 
-### 🎯 目标
+### 目标
 
 把 FFN 替换成 N 个专家，每个 token 路由到 top-k 个专家。
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -68,7 +68,7 @@ class MoELayer(nn.Module):
         return out.view(B, L, D)
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **softmax 在 top-k 内做**：而不是先全 softmax 再取 top-k（后者效果差）
 2. **`index_add_` in-place**：累加，不是赋值
@@ -79,11 +79,11 @@ class MoELayer(nn.Module):
 
 ## Q02 · MoE 负载均衡 Loss
 
-### 🎯 目标
+### 目标
 
 防止"赢家通吃"——所有 token 都路由到同一个专家。
 
-### 🛠 代码
+### 代码
 
 ```python
 def aux_loss(gate_logits: torch.Tensor, topk_idx: torch.Tensor, n_experts: int):
@@ -106,7 +106,7 @@ def aux_loss(gate_logits: torch.Tensor, topk_idx: torch.Tensor, n_experts: int):
 total_loss = ce_loss + 0.01 * aux_loss(gate_logits, topk_idx, n_experts)
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **辅助 loss 系数**：太大 → 路由混乱效果差；太小 → 失去均衡作用。常用 0.01
 - **DeepSeek-V2 的 device-level + expert-level**：分两层均衡，跨设备均衡通信开销
@@ -115,7 +115,7 @@ total_loss = ce_loss + 0.01 * aux_loss(gate_logits, topk_idx, n_experts)
 
 ## Q03 · Flash Attention 简化版
 
-### 🎯 目标
+### 目标
 
 完整 Flash Attention 用了 GPU SRAM 优化、tiling、CUDA kernel，超出"手撕"范围。我们写一个**展示思想**的版本：
 
@@ -152,7 +152,7 @@ def flash_attention_simplified(Q, K, V, block_size=64):
     return O / L_q
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **online softmax 是核心**：流式更新最大值，每次 rescale 之前的累加结果
 - **真实 Flash Attention 在 SRAM 里做**：上面只是数学等价的版本，还没体现"省显存"的效果（需要 CUDA kernel）
@@ -162,11 +162,11 @@ def flash_attention_simplified(Q, K, V, block_size=64):
 
 ## Q04 · Tied Embedding
 
-### 🎯 目标
+### 目标
 
 把输入 token embedding 和输出 LM head 的权重绑定（共享），减少参数。
 
-### 🛠 代码
+### 代码
 
 ```python
 class TiedLM(nn.Module):
@@ -185,7 +185,7 @@ class TiedLM(nn.Module):
         return logits
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **优点**：节省 vocab_size × d_model 个参数（GPT-2 small 有 30% 参数量在 embedding！）
 - **缺点**：略微降低性能（约 0.5 PPL），但工业界都这么用
@@ -195,7 +195,7 @@ class TiedLM(nn.Module):
 
 ## Q05 · 梯度累积 + 梯度检查点
 
-### 🎯 梯度累积：模拟大 batch
+### 梯度累积：模拟大 batch
 
 ```python
 def train_with_grad_accum(model, dataloader, optimizer, accum_steps=4):
@@ -211,7 +211,7 @@ def train_with_grad_accum(model, dataloader, optimizer, accum_steps=4):
             optimizer.zero_grad()
 ```
 
-### 🎯 梯度检查点：用算力换显存
+### 梯度检查点：用算力换显存
 
 ```python
 import torch.utils.checkpoint as checkpoint
@@ -228,7 +228,7 @@ class CheckpointedBlock(nn.Module):
         return self.block(x)
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **梯度累积**：loss 必须 `/= accum_steps`，否则等于 `accum_steps` 倍学习率
 2. **梯度检查点**：约省 70% 激活显存，但训练慢约 30%（多一次前向）

@@ -1,6 +1,6 @@
 # 05 · StackQueue 栈与队列
 
-## 📑 本章目录
+## 本章目录
 
 - [基础知识](#基础知识)
 - [Q01 · 用栈实现队列](#q01--用栈实现队列)
@@ -26,7 +26,7 @@
 
 > [LeetCode 232](https://leetcode.cn/problems/implement-queue-using-stacks/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 两个栈：
 
@@ -35,7 +35,7 @@
 
 pop 时如果 `stack_out` 为空，就把 `stack_in` 全部倒过去，再 pop。
 
-### 🛠 代码
+### 代码
 
 ```python
 class MyQueue:
@@ -66,7 +66,7 @@ class MyQueue:
 
 > [LeetCode 225](https://leetcode.cn/problems/implement-stack-using-queues/) · 难度：⭐⭐
 
-### 🎯 思路（一个队列即可）
+### 思路（一个队列即可）
 
 pop 时把队列**前 n-1 个**出队再入队，最后一个就是栈顶。
 
@@ -98,7 +98,7 @@ class MyStack:
 
 > [LeetCode 20](https://leetcode.cn/problems/valid-parentheses/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 遇到左括号入栈；遇到右括号检查栈顶是否匹配，匹配则出栈，不匹配返回 False。最后栈为空才有效。
 
@@ -116,12 +116,12 @@ class Solution:
         return not stack
 ```
 
-### 🪤 易错点
+### 易错点
 
 - 不能只看长度奇偶 → 必须用栈匹配
 - 最后**栈必须空**（不然有未闭合的左括号）
 
-### 🔗 同类题
+### 同类题
 
 - [删除字符串中的所有相邻重复项](https://leetcode.cn/problems/remove-all-adjacent-duplicates-in-string/)
 
@@ -131,7 +131,7 @@ class Solution:
 
 > [LeetCode 1047](https://leetcode.cn/problems/remove-all-adjacent-duplicates-in-string/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 栈：当前字符 == 栈顶 → pop；否则 push。
 
@@ -153,7 +153,7 @@ class Solution:
 
 > [LeetCode 150](https://leetcode.cn/problems/evaluate-reverse-polish-notation/) · 难度：⭐⭐
 
-### 🎯 思路
+### 思路
 
 逆波兰（后缀）：运算符在后。
 遍历 token：数字入栈；运算符弹出两个数字算完再入栈。
@@ -175,7 +175,7 @@ class Solution:
         return stack[0]
 ```
 
-### 🪤 易错点
+### 易错点
 
 - 弹出顺序：**先弹的是 b（右操作数），后弹的是 a**
 - 整数除法：`int(a/b)` **而非 `a // b`**（后者向下取整，对负数结果不同）
@@ -186,7 +186,7 @@ class Solution:
 
 > [LeetCode 239](https://leetcode.cn/problems/sliding-window-maximum/) · 难度：⭐⭐⭐ · 标签：单调队列
 
-### 🎯 思路
+### 思路
 
 **单调递减队列**：只保留窗口中可能成为最大值的元素。
 
@@ -194,7 +194,7 @@ class Solution:
 - 队首元素出窗口（i - k 等于队首元素索引）时弹出
 - 队首始终是当前窗口最大
 
-### 🛠 代码
+### 代码
 
 ```python
 from collections import deque
@@ -214,12 +214,12 @@ class Solution:
         return ans
 ```
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n)**（每个元素最多进出一次）
 - 空间：O(k)
 
-### 🪤 易错点
+### 易错点
 
 - 队列存的是**下标**而非值（方便判断是否出窗口）
 - 单调递减：所以入队前要弹出所有更小的
@@ -230,13 +230,13 @@ class Solution:
 
 > [LeetCode 347](https://leetcode.cn/problems/top-k-frequent-elements/) · 难度：⭐⭐⭐ · 标签：堆
 
-### 🎯 思路
+### 思路
 
 1. 用 map 统计频率
 2. 小顶堆维护 Top-K（超过 k 个就 pop 堆顶）
 3. 取出堆中所有元素
 
-### 🛠 代码
+### 代码
 
 ```python
 import heapq
@@ -253,11 +253,11 @@ class Solution:
         return [x for _, x in heap]
 ```
 
-### 🪤 为什么用小顶堆？
+### 为什么用小顶堆？
 
 求 Top-K **大**值用**小顶堆**——堆顶是当前 K 个里最小的，新元素比它大才有资格进。
 
-### 📊 复杂度
+### 复杂度
 
 - 时间：**O(n log k)**
 - 空间：O(n + k)

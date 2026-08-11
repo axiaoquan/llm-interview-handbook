@@ -2,7 +2,7 @@
 
 LayerNorm / RMSNorm / BatchNorm，手撕 + 对比。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · LayerNorm](#q01--layernorm)
 - [Q02 · RMSNorm](#q02--rmsnorm)
@@ -13,7 +13,7 @@ LayerNorm / RMSNorm / BatchNorm，手撕 + 对比。
 
 ## Q01 · LayerNorm
 
-### 🎯 目标
+### 目标
 
 对**每个样本的最后一维（特征维）**做归一化：
 
@@ -21,7 +21,7 @@ $$
 y = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma + \beta
 $$
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -42,7 +42,7 @@ class LayerNorm(nn.Module):
         return x_hat * self.gamma + self.beta
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **`unbiased=False`**：用有偏方差（除以 n 而不是 n-1），跟 PyTorch 官方实现一致
 2. **`keepdim=True`**：保留维度方便广播，否则形状对不上
@@ -53,7 +53,7 @@ class LayerNorm(nn.Module):
 
 ## Q02 · RMSNorm
 
-### 🎯 目标
+### 目标
 
 LayerNorm 的简化版：去掉减均值、去掉 beta，只用 RMS 归一化。**LLaMA 全系用的就是这个**。
 
@@ -61,7 +61,7 @@ $$
 y = \frac{x}{\mathrm{RMS}(x)} \cdot \gamma, \quad \mathrm{RMS}(x) = \sqrt{\frac{1}{d}\sum x_i^2 + \epsilon}
 $$
 
-### 🛠 代码
+### 代码
 
 ```python
 class RMSNorm(nn.Module):
@@ -78,7 +78,7 @@ class RMSNorm(nn.Module):
         return x_hat * self.gamma
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **没有 beta**：只学一个 gamma，参数量减半
 - **不减均值**：直接除 RMS。论文实证：均值这一步对效果影响小，但占 1/3 计算量
@@ -98,7 +98,7 @@ def forward(self, x):
 
 ## Q03 · BatchNorm（对比）
 
-### 🎯 目标
+### 目标
 
 对**每个特征**在 batch 维度上归一化（CV 常用，NLP 不用）：
 
@@ -106,7 +106,7 @@ $$
 y_j = \frac{x_j - \mu_j^{(\text{batch})}}{\sqrt{\sigma_j^{(\text{batch})2} + \epsilon}} \cdot \gamma_j + \beta_j
 $$
 
-### 🛠 代码
+### 代码
 
 ```python
 class BatchNorm1d(nn.Module):
@@ -136,7 +136,7 @@ class BatchNorm1d(nn.Module):
         return x_hat * self.gamma + self.beta
 ```
 
-### 📊 三种 Norm 对比
+### 三种 Norm 对比
 
 | 维度 | LayerNorm | RMSNorm | BatchNorm |
 |---|---|---|---|
@@ -146,7 +146,7 @@ class BatchNorm1d(nn.Module):
 | 参数量 | 2d（γ + β） | d（只 γ） | 2d（γ + β + running buffers） |
 | LLM 用法 | 早期（GPT-2） | 主流（LLaMA/Qwen） | 不用 |
 
-### 🪤 NLP 为什么不用 BatchNorm
+### NLP 为什么不用 BatchNorm
 
 - **变长序列**：不同样本长度不同，batch 维度统计不稳定
 - **batch 间相关性**：训练/推理 batch 分布差异大，running stats 失效
@@ -156,7 +156,7 @@ class BatchNorm1d(nn.Module):
 
 ## Q04 · Pre-Norm vs Post-Norm
 
-### 🎯 区别
+### 区别
 
 ```python
 # Post-Norm（原 Transformer，2017）
@@ -172,7 +172,7 @@ def pre_norm_block(x):
     return x
 ```
 
-### 📊 对比
+### 对比
 
 | 维度 | Post-Norm | Pre-Norm |
 |---|---|---|
@@ -181,7 +181,7 @@ def pre_norm_block(x):
 | 最终精度 | 略高（如果训得动） | 略低 |
 | 现代 LLM | ❌ | ✅ 全用 |
 
-### 🪤 易错点
+### 易错点
 
 - **为什么 Pre-Norm 更稳**：残差路径上的 norm 不会缩小信号，梯度能畅通流到底层
 - **Post-Norm 必须 warmup**：不然初期梯度爆炸 / 消失

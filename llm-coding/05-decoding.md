@@ -2,7 +2,7 @@
 
 LLM 推理时的采样策略——决定生成质量、多样性、稳定性。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · Greedy / Argmax Decoding](#q01--greedy--argmax-decoding)
 - [Q02 · Top-k Sampling](#q02--top-k-sampling)
@@ -15,11 +15,11 @@ LLM 推理时的采样策略——决定生成质量、多样性、稳定性。
 
 ## Q01 · Greedy / Argmax Decoding
 
-### 🎯 目标
+### 目标
 
 每步选 logits 最大的 token。最简单但最容易陷入重复。
 
-### 🛠 代码
+### 代码
 
 ```python
 import torch
@@ -35,7 +35,7 @@ def greedy_decode(model, input_ids, max_new_tokens=50, eos_id=None):
     return input_ids
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **重复退化**：贪婪解码极易陷入 "the the the the"，**生产环境很少单独用**
 - 适合：翻译、摘要等"答案唯一"的任务
@@ -45,11 +45,11 @@ def greedy_decode(model, input_ids, max_new_tokens=50, eos_id=None):
 
 ## Q02 · Top-k Sampling
 
-### 🎯 目标
+### 目标
 
 只在 logits 排名前 k 的 token 里采样，剔除长尾噪声。
 
-### 🛠 代码
+### 代码
 
 ```python
 def top_k_logits(logits: torch.Tensor, k: int):
@@ -68,7 +68,7 @@ def sample_top_k(logits: torch.Tensor, k: int = 50):
     return torch.multinomial(probs, num_samples=1)            # [B, 1]
 ```
 
-### 🪤 易错点
+### 易错点
 
 - **k 选大了等于不过滤；选小了等于贪婪**：常用 k=40 ~ 50
 - **置 -inf 比直接置 0 更稳**：softmax 后是真正的 0，不会污染分布
@@ -78,11 +78,11 @@ def sample_top_k(logits: torch.Tensor, k: int = 50):
 
 ## Q03 · Top-p (Nucleus) Sampling
 
-### 🎯 目标
+### 目标
 
 动态选择最小集合，使其累积概率 ≥ p。比 top-k 更自适应。
 
-### 🛠 代码
+### 代码
 
 ```python
 def top_p_logits(logits: torch.Tensor, p: float = 0.9):
@@ -111,13 +111,13 @@ def sample_top_p(logits: torch.Tensor, p: float = 0.9):
     return torch.multinomial(probs, num_samples=1)
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **mask 右移一位**：保留"第一个让累积超过 p 的 token"，否则会少选一个
 2. **mask[:, 0] = False**：第一个 token 必须保留（即使它本身概率 > p）
 3. **scatter 回原顺序**：sort 后位置乱了，要用 scatter 把 -inf 放回原 logits 的对应位置
 
-### 📊 Top-k vs Top-p 对比
+### Top-k vs Top-p 对比
 
 ```
 logits 概率分布：[0.6, 0.2, 0.1, 0.05, 0.03, 0.02]
@@ -132,7 +132,7 @@ top_p=0.85 → 保留累积 ≥ 0.85 的最小集：[0.6, 0.2, 0.1] = 0.9
 
 ## Q04 · Temperature Scaling
 
-### 🎯 目标
+### 目标
 
 控制分布的"陡峭度"：T 越大越平、越随机；T 越小越尖、越确定。
 
@@ -140,7 +140,7 @@ $$
 P_i = \frac{\exp(\text{logit}_i / T)}{\sum_j \exp(\text{logit}_j / T)}
 $$
 
-### 🛠 代码
+### 代码
 
 ```python
 def apply_temperature(logits: torch.Tensor, temperature: float):
@@ -175,7 +175,7 @@ def sample(model, input_ids, max_new_tokens=50,
     return input_ids
 ```
 
-### 🪤 经验值
+### 经验值
 
 | 任务 | 推荐 |
 |---|---|
@@ -188,11 +188,11 @@ def sample(model, input_ids, max_new_tokens=50,
 
 ## Q05 · Beam Search
 
-### 🎯 目标
+### 目标
 
 每步保留 logp 累积最高的 k 条候选路径，最后输出最高分序列。**确定性强，多样性差**。
 
-### 🛠 代码
+### 代码
 
 ```python
 @torch.no_grad()
@@ -237,14 +237,14 @@ def beam_search(model, input_ids, beam_size=4, max_new_tokens=50, eos_id=None):
     return beams[0][0]
 ```
 
-### 🪤 易错点
+### 易错点
 
 1. **长度归一化**：直接累积 logp 会偏向短序列（每个 logp 都是负数），所以除以长度
 2. **EOS 处理**：beam 命中 EOS 后要"冻结"，不再扩展，但保留它参与最终排名
 3. **不能跟 sampling 混用**：beam search 是确定性的，跟温度、top-p 互斥
 4. **显存爆炸**：每步要并发跑 beam_size 个序列的前向，相当于 batch_size × beam_size
 
-### 📊 Beam Search vs Sampling
+### Beam Search vs Sampling
 
 | | Beam Search | Sampling |
 |---|---|---|
@@ -257,11 +257,11 @@ def beam_search(model, input_ids, beam_size=4, max_new_tokens=50, eos_id=None):
 
 ## Q06 · Repetition Penalty
 
-### 🎯 目标
+### 目标
 
 惩罚已经生成过的 token，避免"the the the"。
 
-### 🛠 代码
+### 代码
 
 ```python
 def repetition_penalty(logits: torch.Tensor, input_ids: torch.Tensor, penalty: float = 1.2):
@@ -284,7 +284,7 @@ def sample_with_rep_penalty(model, input_ids, ..., rep_penalty=1.2):
         # ... 后续 top-k / top-p / sample
 ```
 
-### 🪤 替代方案：no_repeat_ngram
+### 替代方案：no_repeat_ngram
 
 ```python
 def no_repeat_ngram_logits(logits, input_ids, ngram_size=3):
@@ -304,7 +304,7 @@ def no_repeat_ngram_logits(logits, input_ids, ngram_size=3):
     return logits
 ```
 
-### 🪤 选型建议
+### 选型建议
 
 | 场景 | 用什么 |
 |---|---|

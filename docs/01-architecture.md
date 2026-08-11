@@ -2,7 +2,7 @@
 
 Transformer 及其变体的所有组件 —— 大模型面试**绝对核心**章节。
 
-## 📑 本章目录
+## 本章目录
 
 - [Q01 · Transformer 整体架构](#q01--transformer-整体架构)
 - [Q02 · Self-Attention 自注意力](#q02--self-attention-自注意力)
@@ -20,12 +20,12 @@ Transformer 及其变体的所有组件 —— 大模型面试**绝对核心**�
 
 ## Q01 · Transformer 整体架构
 
-### 🎯 一句话答案
+### 一句话答案
 
 Transformer 由 **Encoder + Decoder** 组成（每部分由 $N$ 个相同的 block 堆叠），核心组件是
 **Self-Attention + FFN + 残差连接 + LayerNorm**。
 
-### 📖 详细展开
+### 详细展开
 
 ```
               Input Embedding + Position Encoding
@@ -49,7 +49,7 @@ Transformer 由 **Encoder + Decoder** 组成（每部分由 $N$ 个相同的 blo
                   Linear → Softmax → Output
 ```
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：为什么 Transformer 比 RNN 好？**
   A：可以**并行**计算（GPU 友好），训练快；RNN 必须串行（每步依赖上一步）。同时 Self-Attention 提供全局感受野，长距离依赖比 RNN 强得多。
@@ -64,12 +64,12 @@ Transformer 由 **Encoder + Decoder** 组成（每部分由 $N$ 个相同的 blo
 
 > 难度：⭐⭐⭐ · 常见公司：所有大厂必考
 
-### 🎯 一句话答案
+### 一句话答案
 
 Self-Attention 通过 $\mathrm{softmax}(QK^T/\sqrt{d_k})V$ 让序列中每个位置都能**动态聚合**全局信息，
 其核心优势是**并行计算 + 全局感受野**，但代价是 $O(n^2 d)$ 的复杂度。
 
-### 📖 详细展开
+### 详细展开
 
 #### 1. 核心公式
 
@@ -130,7 +130,7 @@ class SelfAttention(nn.Module):
 
 > ⚠️ 易错点：是 `masked_fill`（带 ed），不是 `mask_fill`。
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：为什么 Q、K、V 要用三个不同的投影矩阵，不能共享？**
   A：Q/K 表达"我关心什么 / 我能被谁关心"是**对偶语义**，V 是"我能贡献的信息"。共享会限制表达能力。
@@ -151,7 +151,7 @@ class SelfAttention(nn.Module):
 
 ## Q03 · Multi-Head Attention 多头注意力
 
-### 🎯 公式
+### 公式
 
 $$
 \mathrm{MultiHead}(Q,K,V) = \mathrm{Concat}(\mathrm{head}_1, \ldots, \mathrm{head}_h) W^O
@@ -163,13 +163,13 @@ $$
 
 设总维度 $d_{model}$、头数 $h$，则 $d_k = d_v = d_{model}/h$，**总参数量与单头相同**。
 
-### 📖 为什么要多头？
+### 为什么要多头？
 
 1. 不同的头代表**不同的注意力模式**（语法、语义、位置等）
 2. 模型可以在不同位置同时关注**不同子空间**的信息
 3. 计算量与单头相同，但**表达能力更强**
 
-### 🛠 实现
+### 实现
 
 ```python
 class MultiHeadAttention(nn.Module):
@@ -202,7 +202,7 @@ class MultiHeadAttention(nn.Module):
         return self.W_O(ctx)
 ```
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：头数 $h$ 怎么选？**
   A：经验上 $d_k$ 不要太小（保留每个头表达能力），常见 $d_k = 64\text{-}128$。LLaMA-7B 是 $32 \text{ heads}$、$d_k = 128$。
@@ -214,11 +214,11 @@ class MultiHeadAttention(nn.Module):
 
 ## Q04 · MHA / MQA / GQA / MLA 区别
 
-### 🎯 一句话总结
+### 一句话总结
 
 随着模型变大，**KV Cache 成为推理瓶颈**，于是出现了一系列让多 Q 头**共享 K/V 头**的变种。
 
-### 📊 对比表
+### 对比表
 
 | 方法 | 描述 | Q 头数 | K/V 头数 | KV Cache | 代表模型 |
 |---|---|---|---|---|---|
@@ -227,7 +227,7 @@ class MultiHeadAttention(nn.Module):
 | **GQA** | 分组查询注意力 | $h$ | $g$（$1<g<h$） | 中等 | LLaMA-2 70B, LLaMA-3 |
 | **MLA** | 多头潜在注意力 | $h$ | 压缩到低维潜在空间 | 最小 | DeepSeek-V2/V3 |
 
-### 📖 MLA 原理（DeepSeek-V2）
+### MLA 原理（DeepSeek-V2）
 
 - 把 KV 压缩到低维潜在空间 $c_t = X W_{DKV}$
 - 推理时只缓存低维 $c_t$，需要时用解耦矩阵投影回来
@@ -241,7 +241,7 @@ $$
 
 $K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ 直接由位置编码生成，避免对压缩向量做复杂旋转。
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：MQA 为什么会掉点？**
   A：所有 Q 头共享一个 K/V，表达能力大幅下降。GQA 是 MHA 和 MQA 之间的折中（既省 cache 又保留差异性）。
@@ -253,11 +253,11 @@ $K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ �
 
 ## Q05 · 位置编码
 
-### 🎯 为什么需要位置编码？
+### 为什么需要位置编码？
 
 Self-Attention 是**置换不变**的——打乱 token 顺序结果不变。所以必须显式注入位置信息。
 
-### 📖 三大流派
+### 三大流派
 
 #### 1. **正弦位置编码**（原始 Transformer）
 
@@ -281,7 +281,7 @@ $$
 2. 直接加到 embedding，深层后位置信息会被内容稀释
 3. 长距离建模不一定最优
 
-#### 2. **RoPE 旋转位置编码**（LLaMA / Qwen / 主流）⭐⭐⭐
+#### 2. **RoPE 旋转位置编码**（LLaMA / Qwen / 主流）
 
 **核心思想**：不再把位置加到 token，而是**直接旋转 Q 和 K**：
 
@@ -316,7 +316,7 @@ $$
 
 $m$ 是每个头不同的固定斜率。优点：**外推性极强**。
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：RoPE 怎么做长上下文外推？**
   A：把 RoPE 的 base（默认 10000）调大，或者用 **NTK-aware Scaling / YaRN**，对低频维度做调整保持精度。
@@ -328,7 +328,7 @@ $m$ 是每个头不同的固定斜率。优点：**外推性极强**。
 
 ## Q06 · LayerNorm / RMSNorm / Pre/Post-Norm
 
-### 🎯 LayerNorm 公式
+### LayerNorm 公式
 
 $$
 \mathrm{LN}(x) = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma + \beta
@@ -336,7 +336,7 @@ $$
 
 沿 **特征维度**归一化，与 batch 无关。
 
-### 📖 Pre-Norm vs Post-Norm
+### Pre-Norm vs Post-Norm
 
 | | Post-Norm（原始 Transformer） | Pre-Norm（GPT-2 / LLaMA） |
 |---|---|---|
@@ -345,7 +345,7 @@ $$
 | 训练稳定性 | 差，需要 warmup | **好**（残差路径无变换） |
 | 实际选择 | 旧架构 | **现代大模型首选** |
 
-### 📖 RMSNorm（LLaMA 使用）
+### RMSNorm（LLaMA 使用）
 
 LayerNorm 的简化版，去掉均值中心化和偏移 $\beta$：
 
@@ -356,7 +356,7 @@ $$
 - **计算更快**（少一次减均值和加 $\beta$）
 - 实验证明效果与 LayerNorm 相当
 
-### 📖 LayerNorm vs BatchNorm
+### LayerNorm vs BatchNorm
 
 | 特性 | BatchNorm | LayerNorm |
 |---|---|---|
@@ -365,7 +365,7 @@ $$
 | 适用场景 | CV | NLP / Transformer |
 | 推理时 | 需要 running stats | 直接计算 |
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：Transformer 为什么不用 BatchNorm？**
   A：Batch 内序列长度不同（padding），统计量不稳；LayerNorm 沿 feature 归一化天然不受影响。
@@ -377,7 +377,7 @@ $$
 
 ## Q07 · FFN 前馈网络（SwiGLU）
 
-### 📖 标准 FFN
+### 标准 FFN
 
 $$
 \mathrm{FFN}(x) = \mathrm{ReLU}(xW_1 + b_1)W_2 + b_2
@@ -385,7 +385,7 @@ $$
 
 两层 MLP，中间维度通常是 $4 d_{model}$。
 
-### 📖 SwiGLU（LLaMA / PaLM）
+### SwiGLU（LLaMA / PaLM）
 
 $$
 \mathrm{SwiGLU}(x) = (\mathrm{Swish}(xW_1) \odot xW_3)W_2
@@ -401,7 +401,7 @@ $$
 
 > **关于参数量**：标准 FFN 中间维度是 $4d$；SwiGLU 由于多了一个矩阵 $W_3$，为了保持总参数量不变，中间维度通常调整为 $\frac{8}{3}d \approx 2.67d$。
 
-### 🪤 面试常见追问
+### 面试常见追问
 
 - **Q：为什么 FFN 中间维度是 $4d$？**
   A：经验最优。理论解释：FFN 提供**特征维度上的非线性扩展**，需要足够大的中间维度才能 hold 住表达能力。
@@ -413,7 +413,7 @@ $$
 
 ## Q08 · Encoder-Only / Decoder-Only / Encoder-Decoder
 
-### 📊 三大架构
+### 三大架构
 
 | 架构 | 注意力 | 代表模型 | 适用任务 |
 |---|---|---|---|
@@ -421,7 +421,7 @@ $$
 | **Decoder-Only** | 单向（因果） | GPT, LLaMA, DeepSeek | 生成、对话 |
 | **Encoder-Decoder** | 双向 + 因果 | T5, BART, mT5 | 翻译、摘要 |
 
-### 🪤 为什么现在的 LLM 都是 Decoder-Only？
+### 为什么现在的 LLM 都是 Decoder-Only？
 
 1. **统一的 next-token prediction** 范式简单且强大
 2. **Scaling Law** 对 Decoder-Only 最友好
@@ -434,7 +434,7 @@ $$
 
 ## Q09 · Causal Mask 因果掩码
 
-### 🎯 作用
+### 作用
 
 在 Decoder 中，每个 token 只能看到自己和之前的 token，靠 **下三角掩码**实现。
 
@@ -452,7 +452,7 @@ mask = torch.tril(torch.ones(seq_len, seq_len))   # 下三角全 1
 scores = scores.masked_fill(mask == 0, float("-inf"))
 ```
 
-### 🪤 追问
+### 追问
 
 - **Q：训练和推理时 Causal Mask 的区别？**
   A：训练时一次性算完整 mask；推理时配合 KV Cache，每步只算当前 query 对所有 key 的注意力（mask 自然成立）。
@@ -461,7 +461,7 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 
 ## Q10 · Tokenization 分词算法
 
-### 📊 主流方法对比
+### 主流方法对比
 
 | 特性 | BPE | WordPiece | SentencePiece |
 |---|---|---|---|
@@ -470,7 +470,7 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 | 空格处理 | 保留 | `##` 标记续接 | `▁` 标记开头 |
 | 使用模型 | GPT, LLaMA | BERT | T5, LLaMA, ChatGLM |
 
-### 📖 BPE vs Unigram
+### BPE vs Unigram
 
 | 特性 | BPE | Unigram |
 |---|---|---|
@@ -479,7 +479,7 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 | 过程 | 逐步合并 | 逐步删除 |
 | 分词 | 确定性 | 概率性（可采样） |
 
-### 📖 中文 LLM 分词的特殊挑战
+### 中文 LLM 分词的特殊挑战
 
 **挑战**：
 
@@ -499,7 +499,7 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 - 增大中文语料比例
 - 扩展词表加入中文 token（Chinese-LLaMA-Alpaca）
 
-### 🪤 追问
+### 追问
 
 - **Q：BPE 一个词元（token）= 几个汉字？**
   A：英文 LLM 的中文 tokenization 经常 1 个汉字对应 2-3 个 token（按字节切）；中文优化模型基本 1 字 1 token。
@@ -508,7 +508,7 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 
 ## Q11 · MoE 混合专家
 
-### 🎯 核心思想
+### 核心思想
 
 把 FFN 替换成**多个并行的"专家"FFN**，每个 token 由一个 **router** 路由到 **Top-k 个**专家（通常 k=1 或 2）。
 
@@ -518,25 +518,25 @@ input ──► Router ─→ Expert 2 ─┼─→ 加权求和
             └─→ Expert N ─┘
 ```
 
-### 📖 优势
+### 优势
 
 - **参数量大但激活量小**：万亿级模型推理时只激活几十亿参数
 - 不同专家可学不同模式
 
-### 📖 关键挑战
+### 关键挑战
 
 - **负载均衡**：避免所有 token 都去同一个专家 → 加 **load balancing loss**
 - **训练不稳定**：router 决策是离散的
 - **通信开销**：专家分布在不同 GPU 上，all-to-all 通信
 
-### 📖 代表模型
+### 代表模型
 
 - **Switch Transformer**：早期纯 Top-1 MoE
 - **Mixtral 8x7B**：8 专家 Top-2，激活 ~13B 推理
 - **DeepSeek-V2/V3**：细粒度专家 + 共享专家
 - **Qwen3.5**：MoE + 线性注意力混合
 
-### 🪤 追问
+### 追问
 
 - **Q：MoE 显存怎么算？**
   A：训练时所有专家都得在显存里（**总参数量**）；推理时也都得在（除非 expert offloading），但只算激活的那 k 个，所以 FLOPs 小。
