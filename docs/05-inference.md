@@ -21,7 +21,7 @@
 ### 核心思想
 
 每生成一个新 token，需要对所有之前的 token 计算 K 和 V。
-KV Cache 把已计算的 K、V **缓存**起来，避免重复计算 → **空间换时间**。
+KV Cache 把历史 token 已计算的 K、V **缓存**起来，避免每个 decode step 重算旧 token 的投影 → **空间换时间**。它不缓存 Q，因为历史 query 不会再次使用；当前 query 仍要与全部历史 key 做点积，所以单步 attention 仍随上下文长度线性增长。
 
 ### KV Cache 显存计算
 
@@ -50,7 +50,7 @@ $$
 ### 追问
 
 - **Q：Encoder 用 KV Cache 吗？**
-  A：不用。Encoder 一次性看到所有 token，没有"逐 token 生成"的过程。KV Cache 只在 **Decoder 自回归生成**时有用。
+  A：普通一次性 encoder self-attention 不需要跨步 cache；但 encoder-decoder 模型在生成时可以缓存 encoder 输出投影得到的 cross-attention K/V。准确说，cache 服务于“多次解码重复使用的 K/V”，并非只要叫 Encoder 就绝对不用。
 
 - **Q：prefill 阶段需要 KV Cache 吗？**
   A：prefill 阶段一次算完整 prompt，**生成 KV Cache**；decode 阶段每步**读取 + 追加** KV Cache。
@@ -72,13 +72,12 @@ $$
 
 ### 效果
 
-- **显存**：$O(n^2) \to O(n)$
+- **中间显存**：不再物化完整 $n\times n$ score/probability 矩阵，额外存储从 $O(n^2)$ 降到近似 $O(n)$
 - **速度**：2-4× 加速（不是因为减少 FLOPs，而是减少 HBM IO）
 
 ### 关键洞察
 
-GPU 的瓶颈往往是**显存带宽（IO）**，不是计算。Flash Attention 的本质是
-**IO-aware** 算法：减少 HBM 读写次数，把更多操作 fuse 到 SRAM 内。
+GPU attention 在许多形状下受**显存带宽（IO）**限制。Flash Attention 的本质是 IO-aware：分块把 Q/K/V 搬进片上 SRAM，利用 online softmax 维护每行的运行最大值和归一化和，在不保存完整注意力矩阵的情况下得到与标准 attention 等价的结果。它没有把 dense attention 的理论 FLOPs 从 $O(n^2)$ 变成线性；速度收益也随序列长度、head dimension、mask 和硬件而变化。
 
 ### 追问
 
@@ -106,8 +105,8 @@ GPU 的瓶颈往往是**显存带宽（IO）**，不是计算。Flash Attention 
 
 ### 效果
 
-- 显存利用率接近 **100%**
-- 吞吐量提升 **2-4×**
+- 显著减少为最大生成长度预留造成的内部/外部碎片
+- 允许在同样显存下容纳更多并发请求，吞吐通常因此提升
 - 不同请求之间还能**共享** prefix（system prompt 等）
 
 ### 追问
@@ -150,12 +149,12 @@ GPU 的瓶颈往往是**显存带宽（IO）**，不是计算。Flash Attention 
 
 1. **Draft model** 自回归生成 $\gamma$ 个 token
 2. **Target model 一次前向**验证这 $\gamma$ 个 token
-3. 从第一个不匹配位置开始 reject，保留匹配的
-4. 从不匹配位置重新采样一个正确的 token
+3. 对草稿 token $x$ 按 $\min(1, p(x)/q(x))$ 接受，其中 $p$ 是 target 分布、$q$ 是 draft 分布；在第一个拒绝处停止
+4. 拒绝时从校正后的残差分布 $\mathrm{norm}(\max(0,p-q))$ 采样；若整段都接受，还可从 target 的下一位置再采一个 token
 
 ### 关键性质
 
-生成结果的分布**与仅用大模型生成完全一致**（无损加速）。
+上述接受—拒绝校正保证采样分布与只用 target model 相同，因此是分布意义上的无损加速。若实现只是比较 argmax 是否一致，或直接保留“看起来猜对”的 token，则不具备这个保证。
 
 ### 局限
 
@@ -209,7 +208,7 @@ $$
 | T = 1 | 原始分布 |
 | T > 1 | 分布平坦，更随机 |
 
-**T = 0** 等价于贪心（理论上）。但实际中由于不同推理后端、数值精度差异，**最高 token 可能产生微小波动**，导致输出仍可能不一致。
+$T=0$ 时除法没有定义；严格说是 $T\to0^+$ 时分布收敛到最大 logit 的 token（并列最大时还需 tie-breaking）。工程实现应显式走 greedy 分支。即使 greedy，硬件非确定性、量化和不同 kernel 仍可能在近似并列的 logits 上产生不同结果。
 
 ### 4) Top-K Sampling
 
@@ -234,21 +233,22 @@ $$
 
 ## Q07 · 重复惩罚
 
-防止生成重复内容。
+防止生成重复内容。常见 repetition penalty 作用在 **logit** 而非 softmax 后概率上，并对正负 logit 分段处理，避免负 logit 除以 $\alpha$ 后反而变大：
 
-$$
-P'(x_i) =
+```math
+z_i'=
 \begin{cases}
-P(x_i) / \alpha, & x_i \in \text{generated} \\
-P(x_i), & \text{otherwise}
+z_i/\alpha, & z_i>0\ \text{且 token }i\text{ 已出现}\\
+\alpha z_i, & z_i<0\ \text{且 token }i\text{ 已出现}\\
+z_i, & \text{其他}
 \end{cases}
-$$
+```
 
-$\alpha > 1$ 时，出现过的 token 会被压低。
+$\alpha>1$ 时降低已出现 token 的相对 logit，之后再统一 softmax。直接修改概率还必须重新归一化，且与常见库实现口径不同。
 
 | 类型 | 公式 |
 |---|---|
-| **Repetition Penalty** | 已生成 token 概率除以 $\alpha$（典型 1.1） |
+| **Repetition Penalty** | 对已生成 token 的 logit 做乘/除惩罚 |
 | **Frequency Penalty** | 按出现**次数线性**惩罚 |
 | **Presence Penalty** | 出现过就**惩罚固定值** |
 
@@ -260,6 +260,8 @@ $\alpha > 1$ 时，出现过的 token 会被压低。
 
 把模型权重和/或激活值从高精度（FP32/FP16）转换为低精度（INT8/INT4）。
 浮点数 → 整数网格 → 计算时反量化。
+
+均匀仿射量化通常写成 $q=\mathrm{clip}(\mathrm{round}(x/s)+z)$，其中 scale $s$ 决定网格间距，zero-point $z$ 让实数 0 可被精确表示。粒度可按 tensor、channel 或 group：group 越小越能适应局部离群值，但需要存更多 scale/zero-point，也增加 kernel 复杂度。低比特的主要难点往往不是平均误差，而是少量离群通道决定了量化范围，挤压了大多数权重可用的码点。
 
 ### 量化的三条轴
 
@@ -288,6 +290,7 @@ $\alpha > 1$ 时，出现过的 token 会被压低。
 
 - **GGUF**：本质是**文件格式**，不是量化算法
 - **QLoRA**：是**微调方案**，不是推理量化
+- **权重大小缩小 4× 不等于推理加速 4×**：还取决于是否有对应低比特 kernel、反量化开销、memory-bound 程度和 batch shape
 
 ### 选型
 
@@ -316,6 +319,8 @@ $\alpha > 1$ 时，出现过的 token 会被压低。
 | **NTK-aware Scaling** | 调整 RoPE base，让低频维度变化更慢 |
 | **YaRN** | NTK 进阶版，对不同频率分段处理 |
 | **Position Interpolation (PI)** | 把测试位置缩放到训练范围内 |
+
+这些方法本质上在重新安排不同频率维度的相位增长，避免测试长度下出现训练未见的高频旋转。只把 `max_position_embeddings` 改大不会改变 RoPE 相位，也不会自动获得长上下文能力；通常还需要长序列继续训练/微调，并检查短上下文退化、远距离检索和不同位置分桶表现。
 
 ### 注意力优化
 

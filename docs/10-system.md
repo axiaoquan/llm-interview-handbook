@@ -27,6 +27,8 @@
 
 7B 模型 → ~112 GB（**还不算 activation**）。
 
+16 bytes/param 是一种常见混合精度 AdamW 口径，不是常数：有的实现梯度为 FP32、有的 BF16 不保留独立 master copy，8-bit optimizer 又会压缩状态。面试估算应先声明 dtype 和是否分片，再分别计算 persistent states、activation、临时 buffer 与碎片。
+
 ### Activation 显存
 
 约 $O(B \times L \times d \times N)$（B=batch, L=seq len, N=layers）。
@@ -44,7 +46,7 @@
 ### 追问
 
 - **Q：怎么把 70B 模型塞进 24G 卡推理？**
-  A：4-bit 量化（70B × 0.5B = 35GB → 还放不下单卡）→ 需要多卡 TP，或卸载到 CPU。
+  A：理想 4-bit 权重下限约为 $70\text{B}\times0.5$ byte $\approx35$ GB，还没算 scale/zero-point、KV Cache、workspace 和运行时开销，因此单张 24 GB 卡仍放不下完整模型。需要更激进量化、多卡切分或 CPU/offload，并接受相应速度和精度代价。
 
 ---
 
@@ -52,7 +54,7 @@
 
 | 框架 | 特点 |
 |---|---|
-| **vLLM** | PagedAttention + Continuous Batching，**吞吐量之王** |
+| **vLLM** | PagedAttention + Continuous Batching，通用高吞吐方案 |
 | **TGI**（HuggingFace） | 工业级，K8s 友好 |
 | **SGLang** | 结构化输出 + RadixAttention，复杂 prompt 高效 |
 | **Triton Inference Server** | NVIDIA 官方，多模型多框架 |
@@ -62,7 +64,7 @@
 ### 追问
 
 - **Q：为什么 vLLM 吞吐高？**
-  A：**PagedAttention**（显存利用率近 100%）+ **Continuous Batching**（请求即来即走）+ 高效 CUDA Kernel。
+  A：Paged KV 管理减少预留和碎片，Continuous Batching 提高调度利用率，再配合高效 kernel。实际吞吐取决于 workload、模型和硬件，不保证接近某个固定显存利用率。
 
 ---
 
@@ -79,10 +81,10 @@ LLM 推理两个阶段特性完全不同：
 
 ### P/D 分离架构
 
-把 prefill 和 decode 部署在**不同的 GPU 上**：
+把 prefill 和 decode 部署在**不同的 GPU 池**：
 
-- Prefill 用算力强的 GPU（H100）
-- Decode 用显存带宽强的 GPU
+- Prefill 池按矩阵计算吞吐和 prompt 长度配置较大 batch
+- Decode 池按显存容量/带宽、并发数和 token latency 配置
 - 中间通过 **KV Cache 迁移**衔接
 
 代表系统：DistServe、Mooncake、SGLang。
@@ -98,19 +100,20 @@ LLM 推理两个阶段特性完全不同：
 
 ### 经验公式（FLOPs）
 
-每生成一个 token 的 FLOPs ≈ **2 × 参数量**（不算 attention 部分）
+对稠密 Transformer，在 batch 很小且忽略 attention、embedding、采样等项时，每个 decode token 的主干矩阵乘 FLOPs 常粗估为 **2 × 激活参数量**；MoE 应使用每 token 激活参数而非总参数。
 
 例：7B 模型生成 1 个 token ≈ 14 GFLOPs。
 
-### 经济成本
+### 为什么 FLOPs 不能直接换算成 tokens/s？
 
-按 cloud GPU 大致价格估算（2026 行情，仅作量级参考）：
+Decode 常受权重和 KV Cache 的显存带宽限制，单流很难达到 GPU 峰值 FLOPs；增加 batch 可复用权重读取、提高算术强度，但会增加每个请求延迟和 KV 显存。成本估算应以目标 workload 实测：
 
-- A100 80G：~$2/小时
-- H100：~$4/小时
-- 一张 H100 BF16 跑 LLaMA-7B 大约 ~3000 tokens/s 单流
+```text
+每百万 token 成本
+= GPU 每小时成本 × GPU 数 × 运行小时 / 有效生成 token × 1,000,000
+```
 
-→ 每 1M output token 成本 ~$0.3-1（与 batch 大小、序列长度、是否量化关系大）。
+必须分别报告 input/output token、TTFT、TPOT、并发、上下文长度分布、成功率和利用率。背某张卡固定 tokens/s 或固定美元数没有可迁移性。
 
 ---
 
@@ -125,10 +128,12 @@ LLM 推理两个阶段特性完全不同：
 - **Prefix Cache**：把常见 prefix 的 KV Cache 持久化，新请求直接复用
 - **RadixAttention**（SGLang）：用基数树管理 prefix，自动复用
 
+Prefix cache 通常要求 token 级前缀完全一致；哪怕空格、模板版本或 special token 不同都会 miss。复用的是模型某一版本、某组位置编码和推理配置下的 KV，换权重或影响 K/V 的 adapter 后通常必须失效。多租户系统还要把 cache key 加入权限域，避免通过命中时延或错误复用泄露其他用户的私有前缀。
+
 ### 追问
 
 - **Q：能省多少？**
-  A：在 system prompt 较长的场景（如 RAG），prefill 显著加速；同 system prompt 多用户场景吞吐 2-5×。
+  A：上限取决于可复用 prefix 占输入的比例和命中率。它主要省 prefill 计算，不能减少后续 decode token 的模型计算；应报告 cache hit rate、复用 token 数、TTFT 变化和 cache 占用，而不是给固定倍数。
 
 ---
 

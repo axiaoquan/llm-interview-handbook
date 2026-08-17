@@ -70,10 +70,12 @@ class MoELayer(nn.Module):
 
 ### 易错点
 
-1. **softmax 在 top-k 内做**：而不是先全 softmax 再取 top-k（后者效果差）
+1. **router 口径要说清楚**：可以先取 top-k 再在选中专家内 softmax，也可以先对全专家 softmax、取 top-k 后重新归一化；两者梯度和分数尺度不同，并非后者必然更差，应与论文/实现保持一致
 2. **`index_add_` in-place**：累加，不是赋值
 3. **GPU 利用率**：朴素实现的 `for e in n_experts` 串行；生产用 grouped GEMM 一次算完
-4. **专家容量限制**：实际系统会限制每个专家最多接收的 token 数（capacity factor），溢出的 token 走残差直通
+4. **专家容量限制**：实际系统常限制每个专家接收的 token 数（capacity factor）；溢出 token 可丢弃专家分支、重路由或走共享/残差路径，策略取决于实现，不能默认都直通
+
+Top-k 的离散选择使未入选专家通常拿不到主任务梯度，容易形成“早期热门专家得到更多训练、因而更热门”的正反馈。负载均衡 loss、router noise、容量控制和 shared experts 都是在解决这个闭环，但约束过强又会牺牲语义专门化。
 
 ---
 
@@ -95,7 +97,7 @@ def aux_loss(gate_logits: torch.Tensor, topk_idx: torch.Tensor, n_experts: int):
     N = gate_logits.size(0)
     # f_e: 路由到专家 e 的 token 比例
     one_hot = F.one_hot(topk_idx, num_classes=n_experts).float()  # [N, k, E]
-    f = one_hot.sum(dim=[0, 1]) / N                                # [E]
+    f = one_hot.sum(dim=[0, 1]) / (N * topk_idx.size(1))           # [E]，和为 1
     # P_e: 门控对专家 e 的平均分配概率
     P = F.softmax(gate_logits, dim=-1).mean(dim=0)                # [E]
     # loss = E * sum(f_e * P_e)，乘上 E 让数量级合理
@@ -110,6 +112,7 @@ total_loss = ce_loss + 0.01 * aux_loss(gate_logits, topk_idx, n_experts)
 
 - **辅助 loss 系数**：太大 → 路由混乱效果差；太小 → 失去均衡作用。常用 0.01
 - **DeepSeek-V2 的 device-level + expert-level**：分两层均衡，跨设备均衡通信开销
+- 对 top-k 路由，$f_e$ 应除以总 assignment 数 $N\times k$；若沿用 Switch Transformer 的 Top-1 公式却只除以 $N$，loss 会额外放大 $k$ 倍。还应分别监控硬路由比例 $f_e$ 和软概率 $P_e$，只看平均 loss 可能掩盖单个热点专家
 
 ---
 
@@ -187,9 +190,9 @@ class TiedLM(nn.Module):
 
 ### 易错点
 
-- **优点**：节省 vocab_size × d_model 个参数（GPT-2 small 有 30% 参数量在 embedding！）
-- **缺点**：略微降低性能（约 0.5 PPL），但工业界都这么用
-- **HuggingFace 的实现**：`tie_word_embeddings=True`（默认）
+- **优点**：节省 vocab_size × d_model 个参数，并让“读入 token 的语义空间”和“预测 token 的分类空间”共享几何结构
+- **约束**：输入 embedding 与输出 classifier 被迫共享同一矩阵，可能限制两者各自最优表示；效果可能提升也可能下降，不存在固定 0.5 PPL 结论
+- **HuggingFace 的实现**：许多模型配置提供 `tie_word_embeddings`；默认值取决于具体架构
 
 ---
 
@@ -200,15 +203,28 @@ class TiedLM(nn.Module):
 ```python
 def train_with_grad_accum(model, dataloader, optimizer, accum_steps=4):
     optimizer.zero_grad()
+    pending = 0
     for step, batch in enumerate(dataloader):
         loss = model(batch)
         # 关键：除以累积步数，让总的梯度等于大 batch 的等效梯度
         loss = loss / accum_steps
         loss.backward()
+        pending += 1
 
         if (step + 1) % accum_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
+            pending = 0
+
+    # dataloader 长度不是 accum_steps 整数倍时，不能静默丢掉最后几步梯度。
+    # 前面每步除以 accum_steps，这里按实际 pending 数把最后窗口校正回来。
+    if pending:
+        correction = accum_steps / pending
+        for p in model.parameters():
+            if p.grad is not None:
+                p.grad.mul_(correction)
+        optimizer.step()
+        optimizer.zero_grad()
 ```
 
 ### 梯度检查点：用算力换显存
@@ -231,8 +247,10 @@ class CheckpointedBlock(nn.Module):
 ### 易错点
 
 1. **梯度累积**：loss 必须 `/= accum_steps`，否则等于 `accum_steps` 倍学习率
-2. **梯度检查点**：约省 70% 激活显存，但训练慢约 30%（多一次前向）
+2. **梯度检查点**：不保存被 checkpoint 区域的大部分中间激活，反向时重算；省多少显存、慢多少取决于切分粒度和算子，不能背固定百分比
 3. **`use_reentrant=False`**：PyTorch 新版推荐，避免一些边界 bug
+
+只有每个 micro-batch 样本/token 权重相同且模型中无跨 batch 统计时，梯度累积才近似等价于一个大 batch。变长序列若每步先做 token mean 再平均，会让短序列和长序列权重失真；更严谨的做法是累计 loss sum 和有效 token 数后统一归一化。BatchNorm 的统计量、dropout 随机性和优化器更新频率也会让两者不完全等价。
 
 ---
 

@@ -37,8 +37,8 @@ def greedy_decode(model, input_ids, max_new_tokens=50, eos_id=None):
 
 ### 易错点
 
-- **重复退化**：贪婪解码极易陷入 "the the the the"，**生产环境很少单独用**
-- 适合：翻译、摘要等"答案唯一"的任务
+- **重复退化**：贪婪解码可能陷入局部高概率循环，但是否发生取决于模型和训练
+- 适合：需要可复现、低随机性的结构化输出或基线评测；生产环境并不少见
 - 不适合：开放对话、创作
 
 ---
@@ -56,6 +56,7 @@ def top_k_logits(logits: torch.Tensor, k: int):
     """返回处理后的 logits（非 top-k 位置置 -inf）"""
     if k <= 0:
         return logits
+    k = min(k, logits.size(-1))
     values, _ = torch.topk(logits, k=k, dim=-1)              # [B, k]
     threshold = values[:, -1:]                                # [B, 1]，第 k 大的值
     return torch.where(logits < threshold, torch.full_like(logits, float('-inf')), logits)
@@ -70,7 +71,8 @@ def sample_top_k(logits: torch.Tensor, k: int = 50):
 
 ### 易错点
 
-- **k 选大了等于不过滤；选小了等于贪婪**：常用 k=40 ~ 50
+- **k 选大了接近不过滤；k=1 才等价于贪婪**。合理 k 取决于模型校准和任务，不存在通用 40/50
+- 用第 k 大阈值过滤时，若边界 logit 并列，可能保留超过 k 个；需要严格 k 个时应基于 top-k indices scatter
 - **置 -inf 比直接置 0 更稳**：softmax 后是真正的 0，不会污染分布
 - **`torch.multinomial` 需要正概率**：上一步已经过 softmax 所以安全
 
@@ -126,7 +128,7 @@ top_k=2  → 只保留前 2：[0.6, 0.2]
 top_p=0.85 → 保留累积 ≥ 0.85 的最小集：[0.6, 0.2, 0.1] = 0.9
 ```
 
-**结论**：top-p 在分布尖锐时少选（更确定），分布平坦时多选（更多样），更智能。
+**结论**：top-p 在分布尖锐时少选，分布平坦时多选，因此候选集大小自适应；它不是总比 top-k 好，概率校准差时也可能保留不合适的尾部 token。
 
 ---
 
@@ -145,7 +147,7 @@ $$
 ```python
 def apply_temperature(logits: torch.Tensor, temperature: float):
     if temperature <= 0:
-        # T=0 等价 greedy
+        # temperature <= 0 时应在调用侧显式走 greedy
         return torch.zeros_like(logits).scatter_(
             -1, logits.argmax(dim=-1, keepdim=True), 1.0
         ).log()    # 这种实现稍丑，实际生产里 T=0 走 greedy 分支即可
@@ -159,6 +161,12 @@ def sample(model, input_ids, max_new_tokens=50,
     for _ in range(max_new_tokens):
         logits = model(input_ids)[:, -1, :]
         # 1) 温度
+        if temperature <= 0:
+            next_id = logits.argmax(dim=-1, keepdim=True)
+            input_ids = torch.cat([input_ids, next_id], dim=-1)
+            if eos_id is not None and (next_id == eos_id).all():
+                break
+            continue
         logits = logits / temperature
         # 2) top-k
         if top_k > 0:
@@ -175,14 +183,16 @@ def sample(model, input_ids, max_new_tokens=50,
     return input_ids
 ```
 
-### 经验值
+### 参数如何选择
 
-| 任务 | 推荐 |
+| 任务 | 可作为实验起点 |
 |---|---|
 | 代码生成 | T=0.2, top_p=0.95 |
 | 创意写作 | T=0.9, top_p=0.95 |
 | 严肃问答 | T=0.3, top_k=40 |
 | 大开脑洞 | T=1.2, top_p=0.99 |
+
+$T$ 调整保留集合内的相对概率，top-k/top-p 改变候选集合，二者作用不同。应在固定随机种子、多样本质量、格式成功率和事实错误率上联合调参；这些数值不是跨模型通用答案。
 
 ---
 
@@ -239,9 +249,9 @@ def beam_search(model, input_ids, beam_size=4, max_new_tokens=50, eos_id=None):
 
 ### 易错点
 
-1. **长度归一化**：直接累积 logp 会偏向短序列（每个 logp 都是负数），所以除以长度
+1. **长度归一化**：直接累积 logp 会偏向短序列。生产实现常用 $\mathrm{score}/(\text{generated\_length})^\alpha$；教学代码直接除以完整序列长度会把 prompt 也算进去，只适用于同 prompt 的简单演示
 2. **EOS 处理**：beam 命中 EOS 后要"冻结"，不再扩展，但保留它参与最终排名
-3. **不能跟 sampling 混用**：beam search 是确定性的，跟温度、top-p 互斥
+3. **可以有 beam sampling**：标准 beam search 是确定性的，但也存在在每个 beam 内采样的变体；需要明确算法口径，不能笼统说二者互斥
 4. **显存爆炸**：每步要并发跑 beam_size 个序列的前向，相当于 batch_size × beam_size
 
 ### Beam Search vs Sampling
@@ -269,6 +279,8 @@ def repetition_penalty(logits: torch.Tensor, input_ids: torch.Tensor, penalty: f
     已经出现过的 token 的 logit 除以 penalty（>0）或乘以 penalty（<0）
     HuggingFace 的实现：正 logit 除以 penalty，负 logit 乘以 penalty（让它更负）
     """
+    if penalty < 1.0:
+        raise ValueError("penalty should be >= 1.0")
     score = torch.gather(logits, 1, input_ids)          # [B, L_history]
     score = torch.where(score < 0, score * penalty, score / penalty)
     logits.scatter_(1, input_ids, score)
@@ -277,11 +289,14 @@ def repetition_penalty(logits: torch.Tensor, input_ids: torch.Tensor, penalty: f
 
 # 用法：在采样前应用
 @torch.no_grad()
-def sample_with_rep_penalty(model, input_ids, ..., rep_penalty=1.2):
+def sample_with_rep_penalty(model, input_ids, max_new_tokens=50, rep_penalty=1.2):
     for _ in range(max_new_tokens):
         logits = model(input_ids)[:, -1:, :]
         logits = repetition_penalty(logits.squeeze(1), input_ids, rep_penalty)
-        # ... 后续 top-k / top-p / sample
+        probs = torch.softmax(logits, dim=-1)
+        next_id = torch.multinomial(probs, num_samples=1)
+        input_ids = torch.cat([input_ids, next_id], dim=-1)
+    return input_ids
 ```
 
 ### 替代方案：no_repeat_ngram
@@ -310,7 +325,9 @@ def no_repeat_ngram_logits(logits, input_ids, ngram_size=3):
 |---|---|
 | 通用 | rep_penalty=1.05 ~ 1.2 |
 | 重复严重 | rep_penalty=1.3 + no_repeat_ngram=3 |
-| 代码生成 | 不用！因为代码里关键字必然重复 |
+| 代码生成 | 谨慎使用较弱惩罚；关键字和变量本来就需要重复，强惩罚会破坏语法 |
+
+Repetition penalty 按“是否出现过”处理，不区分出现 1 次还是 10 次；frequency penalty 才随次数增长。它也不知道重复是否语义合理，所以应与任务指标一起调，而不是看到重复就盲目增大 penalty。
 
 ---
 

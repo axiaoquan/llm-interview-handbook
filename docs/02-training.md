@@ -40,8 +40,7 @@ $$
 
 ### 3) Label Smoothing
 
-把硬 one-hot 标签软化成 $(1-\epsilon, \epsilon/(K-1), \ldots)$，**防止过自信** + **提升泛化**。
-LLM 训练里常见 $\epsilon = 0.1$。
+把硬 one-hot 标签软化成 $(1-\epsilon, \epsilon/(K-1), \ldots)$，**抑制过度置信**并给非目标类别提供梯度。$\epsilon=0.1$ 是分类任务常见起点，但因果语言模型并非默认都使用：词表极大且标签本身存在多解时，它可能改善校准，也可能削弱对正确 token 的峰值概率、影响生成质量。应把它当超参数而不是 LLM 固定配置。
 
 ### 追问
 
@@ -50,6 +49,9 @@ LLM 训练里常见 $\epsilon = 0.1$。
 
 - **Q：分类用 MSE 会怎么样？**
   A：和 sigmoid/softmax 配对时容易梯度消失；CE 与之配对梯度形式简洁（$\hat{y} - y$）。
+
+- **Q：为什么 CE 与 softmax 的梯度特别合适？**
+  A：对 logit $z_j$ 求导，softmax 的交叉项与 $-\log p_y$ 正好抵消，得到 $\partial L/\partial z_j=p_j-\mathbb{1}[j=y]$。错误且自信时梯度仍大；MSE 还会额外乘 softmax Jacobian，在饱和区更容易把梯度压小。
 
 ---
 
@@ -63,20 +65,20 @@ LLM 训练里常见 $\epsilon = 0.1$。
 | **SGD + Momentum** | 加动量加速 | CV 经典 |
 | **Adam** | 一阶 + 二阶矩估计，自适应学习率 | 通用 |
 | **AdamW** | Adam + **解耦权重衰减** | **LLM 默认** |
-| **Lion** | 谷歌 2023，只用一阶动量 + sign | 显存省 ~50% |
+| **Lion** | 只维护一阶动量并用 sign 更新 | 相比 Adam 省去二阶矩状态 |
 
 ### AdamW 关键点
 
-Adam 的 weight decay 实际是把 L2 正则加到梯度里 → 与自适应学习率耦合，效果差。
-AdamW 把 weight decay **直接作用在参数上**，效果更好。
+若把 L2 项加入 Adam 的原始梯度，$\lambda\theta$ 也会经过动量和二阶矩预条件，不同参数受到的“衰减”取决于历史梯度尺度。AdamW 将收缩步骤从梯度预条件中拆开，使每步参数收缩近似为 $\theta\leftarrow(1-\eta\lambda)\theta$，这就是“解耦”，而不只是代码里多写一个 $\lambda\theta$。
 
-```python
+```text
 # AdamW 更新（核心）
 m = β1 * m + (1 - β1) * g
 v = β2 * v + (1 - β2) * g²
 m_hat = m / (1 - β1^t)
 v_hat = v / (1 - β2^t)
-θ = θ - lr * (m_hat / (sqrt(v_hat) + ε) + λ * θ)   # ← weight decay 解耦
+θ = (1 - lr * λ) * θ                                # 独立衰减
+θ = θ - lr * m_hat / (sqrt(v_hat) + ε)             # Adam 更新
 ```
 
 ### 优化器显存开销
@@ -88,7 +90,7 @@ v_hat = v / (1 - β2^t)
 - Adam 二阶矩 v：4 bytes
 - = **每参数 16 bytes**
 
-→ 7B 模型，光优化器状态就要 7 × 16 = **112 GB**！这就是为什么需要 ZeRO / 混合精度。
+→ 7B 模型按这个口径总计约 **112 GB**；其中 Adam 的 $m,v$ 两份优化器状态是 8 bytes/param，约 **56 GB**。实际还要算 activation、临时 buffer、通信 bucket 和显存碎片；参数/梯度是否保留 FP32 副本取决于具体混合精度实现。
 
 ### 追问
 
@@ -119,10 +121,11 @@ DeepSeek 等使用：
 
 ### 为什么需要 Warmup？
 
-1. 训练初期参数随机，**大学习率会导致不稳定**
-2. **Adam 的二阶矩初始估计不准确**（偏差大）
-3. 预热期让优化器积累可靠统计量
-4. 经验：Warmup 步数通常占总步数 **1%~5%**
+1. 初期残差流、归一化层和各层梯度尺度尚未协调，直接使用峰值学习率容易让某些层更新量相对权重过大
+2. Adam 虽有 bias correction，但 $v_t$ 仍由很少的 batch 估计，方差大；warmup 让预条件器先积累统计量
+3. 大 batch 训练常使用更高峰值学习率，warmup 可避免最初几步的离散更新破坏表示
+
+Warmup 不是为了“让随机参数先学会一点”这么简单，也不能解决错误初始化、坏数据或过高峰值学习率。比例没有固定答案：应结合 token 数、batch、优化器和 loss spike 监控确定。
 
 ---
 
@@ -147,9 +150,9 @@ DeepSeek 等使用：
 
 - **梯度裁剪**（Gradient Clipping）：
 
-  $$
-  g = \min\left(1, \frac{c}{\Vertg\Vert}\right) \cdot g
-  $$
+  ```math
+  g \leftarrow \min\left(1, \frac{c}{\lVert g\rVert_2}\right)g
+  ```
 
   常见 $c = 1.0$
 - 权重衰减（weight decay）
@@ -157,13 +160,14 @@ DeepSeek 等使用：
 
 ### 3) Loss Spike（训练突然崩）
 
-LLM 大规模训练常见。原因：极少数样本梯度异常大。
+LLM 大规模训练常见，但不能只归因于“极少数坏样本”。还可能来自学习率/动量过激、数据分布突变、attention mask 错误、数值溢出、通信错误或恢复 checkpoint 后优化器状态不一致。
 
 **解决**：
 
 - BF16 替代 FP16（动态范围更大）
-- 跳过异常 batch
-- 自动从前一个 checkpoint 恢复
+- 记录触发 spike 的数据 shard、各层 grad norm、激活最大值和 loss scale，先定位是数据、数值还是系统问题
+- 只有确认单个 batch 损坏时才跳过；盲目跳过会掩盖可重复的实现错误
+- 若要求精确续训，checkpoint 应同时恢复 optimizer、scheduler、RNG 和 dataloader 位置，否则训练轨迹会跳变
 
 ### 追问
 
@@ -176,7 +180,7 @@ LLM 大规模训练常见。原因：极少数样本梯度异常大。
 
 ### 核心做法
 
-**FP16/BF16** 跑前向 + 反向，**FP32** 维护主权重（master weights）。
+**FP16/BF16** 主要用于矩阵计算，归一化、归约、优化器状态等敏感环节常保留 FP32。经典 FP16 方案维护 FP32 master weights；BF16/FSDP/不同优化器是否保留完整主权重取决于实现，不能一概而论。
 
 ### 三种精度对比
 
@@ -226,11 +230,11 @@ BF16 范围接近 FP32，**不需要这个技巧**。
 
 | 级别 | 切分内容 | 显存节省 |
 |---|---|---|
-| **ZeRO-1** | 优化器状态 | ~4× |
-| **ZeRO-2** | + 梯度 | ~8× |
-| **ZeRO-3** | + 参数 | ~$N$×（N 卡数） |
+| **ZeRO-1** | 优化器状态 | 优化器状态部分约缩小为 $1/N$ |
+| **ZeRO-2** | + 梯度 | 再分片梯度 |
+| **ZeRO-3** | + 参数 | 三类模型状态都约按 $1/N$ 分片 |
 
-ZeRO-3 ≈ FSDP，可以训练超大模型，但通信开销变大。
+不能把总显存简单写成固定“4×/8×”：activation、临时 all-gather buffer 和碎片不随 ZeRO stage 等比例下降。ZeRO-3 与 FULL_SHARD FSDP 思路相近，前向/反向需要按层 all-gather 参数并 reduce-scatter 梯度，以通信换模型状态显存。
 
 ### ZeRO-Offload / ZeRO-Infinity
 
@@ -275,7 +279,7 @@ ZeRO-3 ≈ FSDP，可以训练超大模型，但通信开销变大。
   A：DP 跨节点（带宽要求低），TP 节点内（高带宽 NVLink），PP 节点间（少 stage）。
 
 - **Q：长上下文为什么要 SP？**
-  A：activation 显存随序列长度线性增长，SP 把序列切成段分到不同 GPU，每张卡只算一段。
+  A：activation 随序列长度增长，SP 可把 LayerNorm、dropout、残差等逐 token 运算沿序列维分片。但标准 attention 仍需要跨分片获取 K/V 或采用 ring/context parallel 通信；“每张卡只算一段”不等于没有跨卡依赖。
 
 ---
 

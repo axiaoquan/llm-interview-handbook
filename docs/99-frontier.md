@@ -5,7 +5,7 @@
 - [Q01 · Diffusion LLM (DLM)](#q01--diffusion-llm-dlm)
 - [Q02 · State Space Models / Mamba](#q02--state-space-models--mamba)
 - [Q03 · Inference-time Scaling（o1 / DeepSeek-R1）](#q03--inference-time-scaling)
-- [Q04 · MoE 最新进展（DeepSeek V2/V3 / Mixtral / Qwen3.5）](#q04--moe-最新进展)
+- [Q04 · MoE 最新进展（细粒度专家 / 混合稀疏架构）](#q04--moe-最新进展)
 
 ---
 
@@ -23,7 +23,7 @@
 
 ### 优势
 
-- **并行生成**（不像自回归一次只出 1 个）
+- 单个去噪 step 可并行更新多个位置（不像自回归严格按 token 顺序）
 - 可双向利用上下文
 - 推理速度可控（步数 ↔ 质量）
 
@@ -32,14 +32,7 @@
 - **长度偏置**：朴素贪心倾向短输出
 - **全局搜索**：传统 beam search 在去掩码过程中**缺乏全局上下文感知**
 
-### GOS（两阶段全局最优搜索）
-
-DLM 推理优化方向（用户研究方向相关）：
-
-- **阶段一**：贪心确定回答长度（消除长度偏置）
-- **阶段二**：在固定长度上做全局 beam search
-  - 邻域加权机制：距离越近分数越高
-  - 基于 HSIC 的 Beam 选择：防止退化
+“位置并行”不等于端到端一定更快：DLM 需要多个去噪 step，每步可能仍处理整段序列；若反复修改大量低置信位置，总计算可能超过自回归 decode。比较时应在相同质量下看去噪步数、每步序列长度、状态复用能力和 wall-clock，而不是只看是否并行。
 
 ### 代表工作
 
@@ -53,7 +46,7 @@ DLM 推理优化方向（用户研究方向相关）：
 
 ### 核心思想
 
-用**状态空间模型**替代 attention，实现**线性复杂度**且不丢失长程建模能力。
+用**状态空间模型**替代 attention，使序列计算线性增长、decode state 保持固定大小，并尝试保留长程建模能力。
 
 ### 数学形式
 
@@ -61,14 +54,14 @@ $$
 h_t = A h_{t-1} + B x_t, \quad y_t = C h_t
 $$
 
-类似 RNN，但**矩阵 A、B、C 与输入相关**（input-dependent），可学习"什么该记什么该忘"。
+基础线性 SSM 的 $A,B,C$ 固定；Mamba 的 selective 机制让步长 $\Delta$ 以及 $B,C$ 由当前输入生成，而 $A$ 通常仍是学习到但不随 token 变化的结构化参数。输入依赖的离散化控制哪些信息写入、读出，selective scan 则把递推高效实现为并行训练。
 
 ### 与 Transformer 对比
 
 | | Transformer | Mamba |
 |---|---|---|
 | 复杂度 | $O(n^2)$ | $O(n)$ |
-| 并行训练 | ✅ | ✅（用 parallel scan） |
+| 并行训练 | 支持 | 支持（用 parallel scan） |
 | 推理 | KV Cache 大 | 固定 hidden state |
 | 长上下文 | 难 | 天然适合 |
 | 召回能力 | 强 | 弱（精确召回不如 attention） |
@@ -95,6 +88,8 @@ $$
 - **Tree of Thoughts**：探索多条推理路径
 - **Process Reward Model**：对推理过程的每一步打分
 
+推理时扩展只有在“额外计算能产生有差异的候选”且“选择器能识别更好候选”时才有效。Best-of-N 的上限常受 verifier/reward model 限制：选择器分不清时，更多采样只产生不可用多样性；选择器有偏时还会放大 reward hacking。应同时报告候选 oracle 上限、选择后准确率和每题计算预算。
+
 ### DeepSeek-R1 关键贡献
 
 - 用 **GRPO + 规则奖励**（数学题答案对错）做 RL
@@ -112,10 +107,10 @@ $$
 
 ### DeepSeek-V2/V3
 
-- **细粒度专家**：把每个专家拆得更小，激活更多个（默认 6 个 routed + 2 个 shared）
+- **细粒度专家**：把专家拆得更小，每个 token 激活少量 routed experts，并额外设置 shared experts；具体激活数因版本而异
 - **MLA**：极致压缩 KV Cache
 - **辅助损失更轻**（auxiliary-loss-free）
-- V3 是 671B 总参 / 37B 激活的开源最强 MoE
+- V3 展示了“总参数远大于每 token 激活参数”的大规模稀疏设计
 
 ### Mixtral 8x7B
 
@@ -123,11 +118,9 @@ $$
 - 总参 47B，激活 13B
 - 早期开源 MoE 标杆
 
-### Qwen3.5
+### 混合稀疏架构
 
-- **混合架构**：线性注意力（Gated Delta Networks）+ 稀疏 MoE
-- Qwen3.5-Plus / Flash 支持 **1M 上下文**
-- 支持**混合思考模式**（thinking / non-thinking）
+前沿模型常把稀疏 MoE 与 attention、线性 attention 或 SSM 层组合：attention 提供精确内容寻址，线性/状态空间层降低长序列成本，MoE 扩大参数容量。判断设计时应拆开总参数、每 token 激活参数、KV/状态大小、路由通信和训练稳定性，不能只用“总参数很大、激活很小”概括。
 
 ### 趋势
 

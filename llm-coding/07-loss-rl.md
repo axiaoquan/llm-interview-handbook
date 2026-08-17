@@ -53,6 +53,8 @@ def compute_lm_loss(logits: torch.Tensor, labels: torch.Tensor, ignore_index: in
 3. **`contiguous()` 必须**：否则 `.view` 报错
 4. **指令微调的 mask label**：训练 SFT 时只计算 response 部分的 loss，prompt 部分 label 全设 -100
 
+`ignore_index` 影响归约分母：默认 mean 只除以有效 token 数。分布式训练若每张卡有效 token 数不同，先算各卡 mean 再平均会让各卡权重相同而不是各 token 权重相同；严谨实现应 all-reduce loss sum 和 valid-token count 后再相除。
+
 ```python
 # SFT 标签构造
 def make_sft_labels(input_ids, prompt_length):
@@ -112,7 +114,7 @@ class LabelSmoothingLoss(nn.Module):
 
 ### 易错点
 
-- **smoothing=0.1 是常用值**：再大模型容易欠拟合
+- **smoothing=0.1 只是分类任务常见起点**：大词表语言模型未必使用；均匀分给所有错误 token 也忽略了“多个合理下一个词”的语义结构
 - **代码中的 vocab_size - 1**：因为正确类别已经分配了 1-ε，剩下 ε 平均分给其他 V-1 类
 - **不能直接 `scatter_(-100)`**：先把 ignore 位置临时替换成合法 id，再用 mask 去掉
 - **PyTorch 的 `F.cross_entropy` 自带 label_smoothing 参数**（PyTorch ≥1.10）：
@@ -174,11 +176,12 @@ def get_seq_logps(model, input_ids, labels, ignore_index=-100):
 
 ### 易错点（**面试高频**）
 
-1. **为什么要 reference model**：约束当前 policy 不要离 SFT 模型太远（否则会忘记基础能力）
+1. **为什么要 reference model**：DPO 比较 policy 相对 reference 对 chosen/rejected 的改变量，reference 提供隐式奖励的基准；在原始 KL 正则推导中，它对应不偏离 SFT policy 的锚点
 2. **`logsigmoid` 而不是 `sigmoid + log`**：数值稳定（直接 log(sigmoid(x)) 在 x 很负时溢出）
-3. **β 越大 → 更接近 reference / 越保守**；β 越小 → 自由度高但训练不稳定
+3. **$\beta$ 的两层含义**：在理论目标中它是 KL 正则强度，越大偏离 reference 的代价越高；在实现中它同时缩放分类 logit 和梯度，和学习率、数据 margin 相互作用，不能只凭一次训练的 policy KL 机械判断大小
 4. **chosen 和 rejected 必须对应同一个 prompt**；实现时可以拼成一个 batch 做单次 forward，再拆回两组以提高吞吐
 5. **`ignore_index` 不能直接传给 `gather`**：先替换成合法 token id，再 mask 掉
+6. **序列 log-prob 有长度效应**：总和会让长回答累积更多负值；chosen/rejected 长度分布若不平衡，模型可能学习长度捷径。是否做长度归一化会改变目标，不能静默修改，应通过长度配对和分桶指标先诊断
 
 ---
 
@@ -246,6 +249,8 @@ total_loss = actor_loss + value_coef * critic_loss + kl_coef * kl_loss
 4. **mask 必须**：prompt 部分不算 loss
 5. **KL 估计方向**：若样本来自当前 policy，k3 中应使用 `log_ratio = log p_ref - log p_policy`
 
+Clipping 不是硬 KL 约束。它只在样本 advantage 的方向上截断继续提高 surrogate objective 的收益：$A_t>0$ 主要限制 ratio 过大，$A_t<0$ 主要限制 ratio 过小；另一个方向仍可能继续产生梯度。多 epoch、参数共享和样本外动作都可能让真实 KL 变大，所以还要监控 approx KL、clip fraction，并在超阈值时早停或调低学习率。
+
 ---
 
 ## Q05 · GRPO
@@ -308,12 +313,14 @@ def grpo_loss(
 2. **KL estimate**：$e^x-x-1\ge 0$，单样本非负且数值稳定；这里 $x=\log\pi_{ref}-\log\pi_\theta$
 3. **zero-variance group**：一组全同分时 advantage 全为 0，必须监控这类组的比例
 
+组均值作为 baseline 不改变同组样本的相对排序，并能降低共同的 prompt 难度造成的方差；除以组内标准差进一步统一不同 prompt 的奖励尺度。但它也会丢掉“这个 prompt 整组都比另一个 prompt 好”的绝对信息。组大小太小，均值/方差估计噪声大；组大小增大，rollout 成本又线性上升。全对/全错组没有相对信号时，应从采样难度和奖励分辨率解决，不能靠给分母加 epsilon 制造梯度。
+
 ### PPO vs DPO vs GRPO
 
 | 维度 | PPO | DPO | GRPO |
 |---|---|---|---|
-| 需要 reward model | ✅ 或规则奖励 | ❌（直接用偏好对） | 可用 RM 或规则奖励 |
-| 需要 value model | ✅ | ❌ | ❌ |
+| 需要 reward model | 可用 RM 或规则奖励 | 否（直接用偏好对） | 可用 RM 或规则奖励 |
+| 需要 value model | 是 | 否 | 否 |
 | 训练稳定 | 中（要调参） | 较好 | 依赖组内奖励方差 |
 | 数据要求 | prompt + 标量奖励 | 偏好对 | prompt + 同组多次采样 |
 | 适合 | 通用对齐 | SFT 后微调 | 推理类（数学、代码） |
@@ -354,6 +361,8 @@ def reward_model_loss(
 2. `margin > 0` 表示不仅要排对，还要求分差至少达到 margin。
 3. 不能只看 pairwise accuracy；还要看分差分布、校准、不同长度分桶和 OOD 偏好准确率。
 4. chosen / rejected 的 padding、模板和截断策略要一致，避免模型学习伪特征。
+
+Bradley–Terry loss 只识别分差：$r(y)$ 整体加常数不变，若没有额外约束，绝对“0 分”没有语义。pairwise accuracy 也不衡量分差是否校准；当 RM 被 policy 优化到训练分布之外时，即使 held-out pair accuracy 高，错误排序仍可能被策略放大。
 
 ---
 

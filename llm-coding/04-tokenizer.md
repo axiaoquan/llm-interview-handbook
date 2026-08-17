@@ -89,6 +89,8 @@ for pair in merges:
 - **GPT-2 的优化**：直接在 byte 级别做 BPE（256 个起始符号），完美处理任何 Unicode 字符
 - **训练时间**：朴素实现 O(num_merges × n_words × n_pairs)，工业级要用 priority queue 优化（HuggingFace tokenizers 是 Rust 写的）
 
+Byte-level 的“无 OOV”来自任何文本最终都能退回 256 种 byte，不代表切分高效：训练语料很少见的文字可能被拆成多个 token，序列更长。字符级起点对常见 Unicode 更紧凑，但要额外设计 unknown/byte fallback。两者是在词表覆盖与序列长度之间取舍。
+
 ---
 
 ## Q02 · BPE 编码（用规则切词）
@@ -142,7 +144,7 @@ result = encode("lowest newest", merges)
 ```python
 def encode_word_fast(word, merge_ranks: dict):
     """
-    merge_ranks: {('l','o'): 0, ('l','o','w'): 1, ...}  ← 规则的优先级（越早学的 rank 越小）
+    merge_ranks: {('l','o'): 0, ('lo','w'): 1, ...}  ← 每条规则始终是二元 pair
     """
     tokens = list(word) + ['</w>']
     while len(tokens) >= 2:
@@ -206,9 +208,13 @@ def build_vocab(corpus_file: str, num_merges: int = 30000):
 | Qwen-2 | BPE + 中文优化 | 151936 | 好（一个汉字 ≈ 1 token） |
 | Tiktoken (GPT-4) | BPE | 100256 | 较好 |
 
+### 词表为什么不能无限增大？
+
+词表越大，常见短语可用更少 token 表示，降低序列长度；但输入 embedding 和输出 LM head 的参数/计算随 vocab size 增长，低频 token 又训练不足。词表越小则复用充分、开放词汇更稳，却让多语言、数字和代码序列变长。合理词表应按目标语料的 fertility（每字符/每词 token 数）、覆盖率、embedding 成本和下游延迟共同选择。
+
 ### 中文 LLM 的特殊处理
 
-- **预分词器**：先用 jieba / sentencepiece 做粗切分，再 BPE 细化
+- **预分词器**：可按 Unicode 类别、正则或语言边界粗切，再做 BPE/Unigram；SentencePiece 本身是可直接处理原始文本的训练与编码框架，不等同于“先做一次粗分词”
 - **byte fallback**：未在 vocab 里的字符回退到 byte 级（保证 100% 编码成功）
 - **vocab 扩展**：基础模型 + 行业词表，比如医学名词、代码符号
 

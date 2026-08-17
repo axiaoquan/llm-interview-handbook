@@ -30,8 +30,8 @@
 
 ```python
 class Solution:
-    def xxx(self, ...):
-        ...
+    def xxx(self, nums):
+        raise NotImplementedError
 ```
 
 ### 复杂度

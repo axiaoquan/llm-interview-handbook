@@ -15,7 +15,7 @@
 
 - 🤖 **[大模型知识 (`docs/`)](docs/)** — Transformer / 训练 / 微调 / RAG / 推理优化 / 多模态 / 前沿
 - 💻 **[算法手撕 (`algorithms/`)](algorithms/)** — 数组 / 链表 / 树 / DP / Hot100
-- 🧠 **[LLM 手撕 (`llm-coding/`)](llm-coding/)** — Attention / RoPE / LoRA / Beam Search
+- **[LLM 手撕 (`llm-coding/`)](llm-coding/)** — Attention / RoPE / LoRA / Beam Search
 
 **每章一个文件**，顶部带本章目录，顺着读完即可，不用频繁跳转。
 

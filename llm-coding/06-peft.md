@@ -52,7 +52,7 @@ class LoRALinear(nn.Module):
         self.lora_B = nn.Parameter(torch.zeros(out_features, r))
         self.lora_dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        # 关键初始化：A 用 Kaiming 高斯，B 用 0
+        # 常见初始化：A 用 Kaiming uniform，B 用 0
         # 这样初始时 BA = 0，不影响原模型输出
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
@@ -67,12 +67,12 @@ class LoRALinear(nn.Module):
 
 ### 易错点（必考！）
 
-1. **A 和 B 的初始化绝对不能反**：
-   - A 高斯、B 零 → 初始时 BA = 0，模型输出完全等于原模型 ✅
-   - A 零、B 高斯 → 初始时 BA = 0 ✅，但梯度问题：A 的梯度 ∝ B^T，B 是 0 → A 永远学不动 ❌
-2. **`scaling = α / r`**：随 r 变化保持等效学习率，论文推荐 α = 2r
+1. **为什么一个因子置零、另一个随机**：两者都为零时，$\nabla_A L\propto B^T$、$\nabla_B L\propto A^T$ 都为零，训练无法启动。A 随机、B 为零可保证初始 $BA=0$，第一步先更新 B；反过来在数学上也能启动（第一步先更新 A），并非“绝对不能反”，只是常见实现采用前者
+2. **`scaling = α / r`**：把 rank 与分支强度分开调节，但不保证任意初始化下更新范数完全与 r 无关；较大 rank 时也有 $\alpha/\sqrt r$ 的稳定缩放变体
 3. **冻结原 Linear**：`requires_grad = False` 必须做，否则没省到参数
 4. **`@ self.lora_A.T` 不是 `@ self.lora_A`**：注意 weight 的 shape 约定（out, in），跟 nn.Linear 一致
+
+LoRA 假设低秩的是任务更新 $\Delta W$，不是基座 $W$。$r$ 控制更新子空间容量：太小欠拟合，太大增加显存与过拟合风险；应结合覆盖层数、任务跨度和验证集选择，而不是只背 8/16/64。
 
 ---
 
@@ -124,8 +124,8 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
 ### 易错点
 
 - **`get_submodule`**：处理嵌套路径（如 `transformer.h.0.attn.q_proj`）的安全访问
-- **target_modules 选哪些**：通常是 `q_proj, v_proj`（原论文）或加 `k_proj, o_proj` 提升效果
-- **不要包 norm / embedding**：这些层的权重对效果敏感，全参数微调或不动
+- **target_modules 选哪些**：`q_proj, v_proj` 是常见轻量起点；覆盖 `k_proj, o_proj` 和 FFN 会提高容量，也增加可训练参数。没有跨任务固定最优集合
+- **norm / embedding 要单独决策**：LoRA 主要包装矩阵权重；norm 或 embedding 可冻结，也可通过 `modules_to_save` 等方式直接训练，取决于词表变化和任务跨度
 
 ---
 
@@ -168,7 +168,7 @@ def merge_lora(model: nn.Module):
 
 ### 易错点
 
-- **合并后推理零开销**：完全等价于原模型，只是权重微调过
+- **合并后结构零额外矩阵乘**：数学上把两支合成一个权重；有限精度下若 merge dtype 不同可能有微小数值差异
 - **只能 merge 一次**：merge 之后想再换一份 LoRA，要么从头加载原模型，要么记录 merge 前的 base weight
 - **训练完保存**：通常只保存 `lora_A` / `lora_B`（几 MB），加载时再 merge 或注入
 
@@ -217,7 +217,7 @@ class QLoRALinear(nn.Module):
 def quantize_int4(weight: torch.Tensor):
     """对每行做对称量化到 [-8, 7]"""
     abs_max = weight.abs().max(dim=-1, keepdim=True).values
-    scale = abs_max / 7.0
+    scale = (abs_max / 7.0).clamp_min(torch.finfo(weight.dtype).eps)
     quantized = (weight / scale).round().clamp(-8, 7).to(torch.int8)
     return quantized, scale
 ```
@@ -228,6 +228,8 @@ def quantize_int4(weight: torch.Tensor):
 - **Double Quantization**：把 scale 也量化（节省 0.4 bits/param）
 - **Paged Optimizer**：CPU 内存里放 optimizer states，避免 OOM
 - **完整实现看 bitsandbytes 库**
+
+教学代码用 `int8` 张量保存数值范围为 INT4 的整数，**没有真正把两个 4-bit 值打包进一个 byte**，因此不能展示真实显存节省；生产 kernel 还要处理 block/group scale、packing 和 fused dequant-GEMM。NF4 的码点按近似正态权重的分位数非均匀分布，目标是把有限码点更多放在高概率区域，而不是简单换一个 dtype 名称。
 
 ---
 
@@ -278,9 +280,9 @@ class BlockWithAdapter(nn.Module):
 | 维度 | LoRA | Adapter |
 |---|---|---|
 | 插入位置 | 旁路（并联） | 串行（在 block 后） |
-| 推理开销 | 0（可 merge） | 多两层 Linear（不可消） |
+| 推理开销 | merge 后无额外矩阵乘 | 多两层 Linear（不可消） |
 | 参数量 | 极少（rank） | 较少（bottleneck） |
-| 现代主流 | ✅ | 已被 LoRA 替代 |
+| 现代使用 | 广泛 | 仍用于需要模块化串行适配等场景 |
 
 ---
 

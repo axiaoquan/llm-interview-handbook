@@ -30,9 +30,11 @@ $$
 
 ### 关键点
 
-- **大 batch 是关键**（更多负样本 → 更好对比）
+- **大 batch 很重要**：batch 内其他样本充当负例，候选更多通常提升辨别难度，但也增加“语义相同却被当作负例”的 false negatives
 - 训练数据是**图文配对的网页数据**（4 亿对）
 - 推理时**零样本分类**：给定 N 个类别名 → 编码成文本向量 → 与图像向量做相似度
+
+温度 $\tau$ 决定相似度 logit 的尺度：$\tau$ 小会让 softmax 更尖、强调 hardest negatives，同时也放大噪声配对的梯度；$\tau$ 大则信号过平。CLIP 学习的是跨模态全局对齐，不自动获得区域定位、计数或字符级 OCR，这些能力需要更细粒度视觉特征和训练目标。
 
 ### 追问
 
@@ -65,6 +67,8 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
 - LLM 主体冻结，只训 Q-Former + 投影层
 - 训练成本低
 
+可学习 query 的作用类似固定容量的信息瓶颈：无论 ViT 输出多少 patch，都压成固定数量 token，控制 LLM 上下文成本；cross-attention 让每个 query 学会从视觉 token 中提取不同信息。代价是压缩可能丢失小目标和密集文字，所以 query 数不是越少越好，需要在信息保真与序列成本之间折中。
+
 ---
 
 ## Q03 · LLaVA / MiniGPT 架构
@@ -77,7 +81,7 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
                               文本 tokens
 ```
 
-**核心思想**：不需要复杂的 Q-Former，**一个 MLP 投影就够了**。简单暴力但有效。
+**核心思想**：直接用 projector 把视觉特征映射到 LLM embedding 空间，结构更简单。它不是证明 Q-Former “多余”，而是选择保留更多视觉 token、把跨模态融合压力交给 LLM；换来实现简单和信息保真，也增加上下文长度与 attention 成本。
 
 ### 训练两阶段
 
@@ -110,7 +114,7 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
   A：DINOv2 视觉特征更细（适合 segmentation 等下游）；CLIP 语义对齐好（适合接 LLM）。
 
 - **Q：SigLIP 比 CLIP 好在哪？**
-  A：sigmoid 损失对负样本规模更友好，**小 batch 也能训**，且效果略好。
+  A：CLIP 对一整行/列样本做 softmax 竞争，loss 和全局候选集合耦合；SigLIP 把每个图文 pair 视为独立二分类，用 sigmoid loss 处理正负对，减少对全局 softmax 归一化和超大 batch all-gather 的依赖。它仍受负样本数量、采样和类别不平衡影响，不能简化成“小 batch 一定更好”。
 
 ---
 
@@ -149,7 +153,7 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
 ### 追问
 
 - **Q：Qwen2.5-VL 用绝对坐标而不归一化，好处是什么？**
-  A：模型能学到**真实物体大小关系**，对小物体检测、精确定位、OCR 有显著好处。归一化会丢失尺度信息。
+  A：绝对像素坐标保留输入分辨率信息，便于把输出直接映射回原图；归一化坐标则跨分辨率更统一。两者各有代价，“绝对坐标一定更适合小物体”不是由坐标形式单独保证的，还取决于动态分辨率、视觉 token 密度、标注精度和训练分布。
 
 ---
 
@@ -163,7 +167,7 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
 2. **多模态向量库**：存图、文及其向量
 3. **跨模态检索**：文 → 图 / 图 → 文 / 图+文 → 文
 
-### 应用场景（用户研究方向）
+### 应用场景
 
 - **医学影像 RAG**：结合医学知识库 + 多模态大模型生成带证据的影像报告
 - **产品图搜**：用图找相似商品 + 描述
@@ -186,6 +190,8 @@ q(x_t \mid x_{t-1}) = \mathcal{N}(x_t; \sqrt{1-\beta_t} x_{t-1}, \beta_t I)
 $$
 
 最终 $x_T$ 接近纯高斯噪声。
+
+前向链可以合并成一步采样：$x_t=\sqrt{\bar\alpha_t}x_0+\sqrt{1-\bar\alpha_t}\epsilon$。因此训练时不必真的从 1 走到 $t$，可以随机采一个时间步直接构造 $x_t$；多步只发生在生成阶段。这也是扩散训练能够并行的关键。
 
 ### 反向过程（去噪）
 
@@ -215,7 +221,7 @@ $$
 | 控制 | classifier-free guidance | prompting |
 | 用途 | 图、视频生成 | 文本生成 |
 
-> 💡 **DLM（Diffusion LLM）** = 把扩散思想用到文本生成，详见 [99 · Frontier](99-frontier.md)。
+> **DLM（Diffusion LLM）** = 把扩散思想用到文本生成，详见 [99 · Frontier](99-frontier.md)。
 
 ---
 

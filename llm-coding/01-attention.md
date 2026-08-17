@@ -47,10 +47,12 @@ def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0):
 
 ### 易错点
 
-- **为什么除 $\sqrt{d_k}$**：$Q \cdot K$ 是 $d_k$ 项独立同分布之和，方差为 $d_k$；除掉 $\sqrt{d_k}$ 让方差归一化到 1，softmax 不会饱和
+- **为什么除 $\sqrt{d_k}$**：若 $q_j,k_j$ 独立、零均值、单位方差，则 $q^\top k$ 的方差是 $d_k$，标准差是 $\sqrt{d_k}$。除以标准差后 logit 的方差回到约 1，避免 softmax 随 head dimension 增大而饱和
+- **为什么不是除以 $d_k$**：缩放随机变量 $z$ 时，$\mathrm{Var}(z/c)=\mathrm{Var}(z)/c^2$。取 $c=\sqrt{d_k}$ 才得到单位方差；取 $c=d_k$ 会让方差降到 $1/d_k$，注意力越来越接近均匀。这个结论依赖近似分布假设，QK-Norm 或可学习 temperature 可以处理实际尺度偏离
 - **`masked_fill` 不是 `mask_fill`**（少一个 d）
 - **mask 用 `-inf` 还是 `0`**：填 `-inf`，softmax 后变 0；直接乘 0 会导致归一化错位
 - **softmax 的 `dim`**：必须是 `-1`（key 维度），归一化"每个 query 对所有 key 的注意力分布"
+- **整行都被 mask**：一行全是 `-inf` 时 softmax 会得到 NaN。数据管线应保证每个有效 query 至少能看见一个 key，或在 fused SDPA 中使用正确的布尔 mask 语义
 
 ---
 
@@ -118,8 +120,12 @@ attn = softmax(scores) @ V:               [B, h, L_q, d_k]
 
 1. **`.transpose` 后必须 `.contiguous()` 才能 `.view`**——否则报错，因为 transpose 不改 storage
 2. **mask 的形状要能广播**：`[B, 1, L_q, L_k]` → 复制到所有头
-3. **bias=False**：Transformer 论文里 W_q/W_k/W_v 默认无 bias
-4. **W_o 不能省**：concat 后必须再过一层 Linear 让多头信息融合
+3. **bias 不是原则问题**：不同架构有的使用、有的不使用；面试实现可设 `bias=False`，但不要把它说成 Attention 的数学要求
+4. **W_o 的作用**：把各头拼接后的子空间重新混合回 residual stream；理论上可设计无 $W_o$ 的变体，但那会限制头间线性组合，并非标准 MHA
+
+### 为什么多头比一个宽头更有表达力？
+
+一个 softmax 对每个 query 只产生一套对 key 的归一化权重。多头先在不同 Q/K 投影空间内产生多套权重，再分别聚合 V，因而同一 token 可以同时保留多种路由模式。总投影维度固定时，主矩阵参数量与宽单头同阶；代价是更多 softmax、重排和 kernel 开销。多头只提供这种表示能力，**不保证**每个头都会自动对应可解释的语法或位置功能。
 
 ---
 
@@ -260,7 +266,8 @@ class CachedAttention(nn.Module):
             kv_cache['K'] = K
             kv_cache['V'] = V
 
-        # decode 阶段不需要 mask（因为 Q 只有 1 个 token，自然只能看到全部 K=过去+当前）
+        # 单 token decode 且 cache 只含过去+当前时不需要 causal mask。
+        # 若一次解多个新 token（L_new > 1），仍需块状 causal mask，避免新 token 互相看未来。
         scores = (Q @ K.transpose(-2, -1)) / math.sqrt(self.d_k)
         attn = F.softmax(scores, dim=-1)
         out = attn @ V
@@ -299,10 +306,10 @@ def generate(model, prompt_ids, max_new_tokens=50):
 ### 性能对比
 
 ```
-没有 KV Cache：每生成一个 token，重算整个 [L, L] attention → O(L²)/token
-有 KV Cache：每生成一个 token，只算 [1, L] attention      → O(L)/token
+没有 KV Cache：每一步重算整个 prefix 的投影、FFN 和 attention
+有 KV Cache：旧 token 的 K/V 不再重算；单步 attention 仍需让新 query 读取长度 L 的 cache
 
-生成 1000 token 的 prompt 续写：加速约 1000 倍
+因此 attention 部分从每步 O(L²d) 降为 O(Ld)，但端到端还包含 O(d²) 的投影/FFN、显存读取和调度开销。实际加速取决于模型宽度、batch、上下文长度和硬件，不能直接把理论降阶说成“长度为 1000 就加速 1000 倍”。
 ```
 
 ---

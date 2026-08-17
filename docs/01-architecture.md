@@ -56,13 +56,13 @@ Transformer 由 **Encoder + Decoder** 组成（每部分由 $N$ 个相同的 blo
   > 注：Mamba / SSM 等新架构在尝试结合两者优点（保留并行 + 接近线性复杂度）。
 
 - **Q：Transformer 的复杂度瓶颈在哪？**
-  A：Self-Attention 是 $O(n^2 d)$，长序列下成为瓶颈，催生了 Flash Attention / 线性注意力 / 滑动窗口等优化。
+  A：attention 的 score 与加权求和是 $O(n^2d)$，投影与 FFN 约为 $O(nd^2)$。长序列时二次项突出，短序列而模型很宽时 FFN/投影也可能占主要 FLOPs；推理还常受 KV Cache 带宽而非 FLOPs 限制。
 
 ---
 
 ## Q02 · Self-Attention 自注意力
 
-> 难度：⭐⭐⭐ · 常见公司：所有大厂必考
+> 难度：中等 · 高频考点
 
 ### 一句话答案
 
@@ -83,10 +83,20 @@ softmax 归一化后做 V 的加权和。
 
 #### 2. 为什么除以 $\sqrt{d_k}$？
 
-当 $d_k$ 较大时，$Q$ 与 $K$ 的内积方差约为 $d_k$（Xavier 初始化下），
-$QK^T$ 的元素会远离 0，softmax 结果接近 one-hot，**梯度趋近于 0** —— 训练崩溃。
+设一个 query 和 key 的各维近似独立、零均值，且方差分别为
+$\sigma_q^2$、$\sigma_k^2$。点积是 $d_k$ 项乘积之和：
 
-除以 $\sqrt{d_k}$ 把方差稳定回 1 附近，softmax 输出分布平缓，梯度可学。
+```math
+\mathrm{Var}(q^\top k)
+=\sum_{j=1}^{d_k}\mathrm{Var}(q_jk_j)
+\approx d_k\sigma_q^2\sigma_k^2
+```
+
+在归一化和常见初始化下可近似取 $\sigma_q^2\approx\sigma_k^2\approx1$，于是点积的**方差**随 $d_k$ 线性增长，标准差随 $\sqrt{d_k}$ 增长。大幅值 logit 会把 softmax 推入饱和区：最大项概率接近 1，其余项接近 0，Jacobian 中的 $p_i(\delta_{ij}-p_j)$ 也随之变小。
+
+因此除以 $\sqrt{d_k}$，正好消掉标准差的增长，使不同 head dimension 下的 logit 尺度大致不变。
+
+**为什么不是除以 $d_k$？** 因为需要归一化的是标准差，不是方差。除以 $d_k$ 会使方差变成 $1/d_k$，维度越大 logits 反而越接近 0，softmax 趋近均匀，注意力分辨率不足。$\sqrt{d_k}$ 不是数学上唯一可能的常数，而是在“独立、单位方差”假设下自然得到的尺度；若实际分布偏离该假设，也可以配合 QK-Norm 或可学习 temperature。
 
 #### 3. 计算复杂度
 
@@ -128,15 +138,15 @@ class SelfAttention(nn.Module):
         return out, attn
 ```
 
-> ⚠️ 易错点：是 `masked_fill`（带 ed），不是 `mask_fill`。
+> 易错点：是 `masked_fill`（带 ed），不是 `mask_fill`。
 
 ### 面试常见追问
 
 - **Q：为什么 Q、K、V 要用三个不同的投影矩阵，不能共享？**
-  A：Q/K 表达"我关心什么 / 我能被谁关心"是**对偶语义**，V 是"我能贡献的信息"。共享会限制表达能力。
+  A：注意力要同时学习“匹配空间”和“内容空间”。Q/K 决定路由权重，V 决定被路由的内容；若三者共享，改变匹配特征也会被迫改变输出内容。Q、K 理论上可以共享，但会强制相似度采用同一投影下的对称双线性形式，无法表达 query 与 key 的角色不对称。分开投影不是为了形状，而是减少这种结构约束。
 
 - **Q：为什么用 softmax 而不是 sigmoid？**
-  A：softmax 强制概率和为 1，体现"注意力分配"的零和性；sigmoid 各位置独立，会出现"全都重要"的退化。
+  A：softmax 让每个 query 的权重和为 1，输出是 V 的归一化加权和，并对所有 logits 同加常数不变；序列变长时输出尺度也较稳定。sigmoid 让各 key 独立开关，权重和会随激活 key 数变化，需要额外处理尺度。sigmoid attention 并非不可用，只是对应不同归纳偏置。
 
 - **Q：mask 为什么填 $-\infty$ 而不是 0？**
   A：mask 在 softmax **之前**应用。$e^0 = 1$ 仍参与归一化；$e^{-\infty} = 0$ 才能真正屏蔽。
@@ -165,9 +175,11 @@ $$
 
 ### 为什么要多头？
 
-1. 不同的头代表**不同的注意力模式**（语法、语义、位置等）
-2. 模型可以在不同位置同时关注**不同子空间**的信息
-3. 计算量与单头相同，但**表达能力更强**
+1. 每个头拥有独立的投影，可在不同子空间中定义不同的相似度
+2. 单个 softmax 每个 query 只产生一套归一化权重；多头允许同一位置同时形成多套分布，再由 $W^O$ 混合
+3. 当总维度固定时，投影和主干矩阵乘的参数量、数量级 FLOPs 与一个 $d_{model}$ 维单头相近，但并非“免费”：切头、softmax、kernel 启动和中间张量仍有开销
+
+多头并不保证每个头都学出可解释的“语法头”或“位置头”，头之间也可能冗余。更准确的说法是：它扩大了可表示的注意力分布族，而不是预先规定每个头的功能。
 
 ### 实现
 
@@ -224,7 +236,7 @@ class MultiHeadAttention(nn.Module):
 |---|---|---|---|---|---|
 | **MHA** | 标准多头 | $h$ | $h$ | 大 | GPT-2, BERT |
 | **MQA** | 多查询注意力 | $h$ | $1$ | 最小 | PaLM, Falcon |
-| **GQA** | 分组查询注意力 | $h$ | $g$（$1<g<h$） | 中等 | LLaMA-2 70B, LLaMA-3 |
+| **GQA** | 分组查询注意力 | $h$ | $g$（$1 < g < h$） | 中等 | LLaMA-2 70B, LLaMA-3 |
 | **MLA** | 多头潜在注意力 | $h$ | 压缩到低维潜在空间 | 最小 | DeepSeek-V2/V3 |
 
 ### MLA 原理（DeepSeek-V2）
@@ -244,10 +256,10 @@ $K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ �
 ### 面试常见追问
 
 - **Q：MQA 为什么会掉点？**
-  A：所有 Q 头共享一个 K/V，表达能力大幅下降。GQA 是 MHA 和 MQA 之间的折中（既省 cache 又保留差异性）。
+  A：共享 K/V 减少了不同 query 头可使用的独立内容子空间，可能损失质量，但下降幅度依赖模型规模、训练方式和任务，并非必然“大幅”。GQA 用多个 KV 组在 cache 与表达能力之间折中。
 
 - **Q：GQA 的分组数怎么选？**
-  A：经验上 $g = h/8$ 是一个不错的平衡点（LLaMA-2 70B：64 头 Q、8 头 K/V）。
+  A：没有固定 $g=h/8$ 规则。KV 头越少，cache 和带宽越省，但共享约束越强；应在目标 batch/上下文下测质量、KV 显存和 decode 吞吐，并满足 Q heads 能整除 KV heads 等实现约束。
 
 ---
 
@@ -255,7 +267,7 @@ $K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ �
 
 ### 为什么需要位置编码？
 
-Self-Attention 是**置换不变**的——打乱 token 顺序结果不变。所以必须显式注入位置信息。
+不带位置编码的 Self-Attention 对序列置换是**置换等变**的：输入按同一置换重排，输出也只会按相同方式重排；若再做 pooling 才表现为置换不变。它只能识别 token 的内容和集合关系，不能区分“AB”与“BA”，所以必须注入位置信息。
 
 ### 三大流派
 
@@ -319,10 +331,10 @@ $m$ 是每个头不同的固定斜率。优点：**外推性极强**。
 ### 面试常见追问
 
 - **Q：RoPE 怎么做长上下文外推？**
-  A：把 RoPE 的 base（默认 10000）调大，或者用 **NTK-aware Scaling / YaRN**，对低频维度做调整保持精度。
+  A：常用 Position Interpolation、NTK-aware scaling、YaRN 等重新映射位置或不同频率；调大 base 只是其中一种参数化。还通常需要长序列继续训练，并同时检查短上下文退化和远距离检索，不能只改配置里的最大长度。
 
-- **Q：为什么大家不用 learned position embedding 了？**
-  A：训练长度限定后无法外推；RoPE 性能更好。
+- **Q：Learned absolute position embedding 为什么在生成式 LLM 中变少？**
+  A：它为每个训练位置存独立向量，超过表长没有定义，也较难共享相对位移规律；RoPE/相对 bias 更适合变长和外推。但 learned position 仍可用于固定长度模型，不能说已经完全不用。
 
 ---
 
@@ -336,11 +348,17 @@ $$
 
 沿 **特征维度**归一化，与 batch 无关。
 
+### 可学习参数为什么是 $\gamma$ 和 $\beta$？
+
+LayerNorm 的均值、方差由当前 token 的特征即时计算，**不是可学习参数**；真正可学习的是逐特征的缩放 $\gamma\in\mathbb{R}^d$ 和偏移 $\beta\in\mathbb{R}^d$。标准化把每个 token 压到统一的一阶、二阶统计，但不同通道未必都应该保持单位尺度、零中心。仿射参数让网络在保留稳定性的同时，重新学习每个通道合适的幅值和基线；必要时甚至能恢复标准化前后续层所需的尺度。
+
+BatchNorm 也是同样的 $\gamma、\beta$ 设计，只是统计轴不同。它的 batch mean/variance 是当前 batch 的统计量，running mean/variance 是推理用 buffer，二者都不通过梯度学习。$\gamma=1、\beta=0$ 仅表示初始化时“不额外缩放或平移标准化结果”，**不代表整个归一化层是恒等映射**。
+
 ### Pre-Norm vs Post-Norm
 
 | | Post-Norm（原始 Transformer） | Pre-Norm（GPT-2 / LLaMA） |
 |---|---|---|
-| 公式 | $x + \mathrm{LN}(\text{SubLayer}(x))$ | $x + \text{SubLayer}(\mathrm{LN}(x))$ |
+| 公式 | $\mathrm{LN}(x + \text{SubLayer}(x))$ | $x + \text{SubLayer}(\mathrm{LN}(x))$ |
 | 表达能力 | 理论更强 | 略弱 |
 | 训练稳定性 | 差，需要 warmup | **好**（残差路径无变换） |
 | 实际选择 | 旧架构 | **现代大模型首选** |
@@ -353,25 +371,25 @@ $$
 \mathrm{RMSNorm}(x) = \frac{x}{\sqrt{\frac{1}{d}\sum_i x_i^2 + \epsilon}} \cdot \gamma
 $$
 
-- **计算更快**（少一次减均值和加 $\beta$）
+- **算子更简单**（少均值中心化和常见的 $\beta$；实际速度取决于 fused kernel）
 - 实验证明效果与 LayerNorm 相当
 
 ### LayerNorm vs BatchNorm
 
 | 特性 | BatchNorm | LayerNorm |
 |---|---|---|
-| 归一化维度 | Batch 维 | Feature 维 |
-| 依赖 batch size | ✅ | ❌ |
+| 归一化维度 | 每通道跨 batch（及空间/时间轴） | 每个样本/token 的 feature 维 |
+| 依赖 batch size | 是 | 否 |
 | 适用场景 | CV | NLP / Transformer |
 | 推理时 | 需要 running stats | 直接计算 |
 
 ### 面试常见追问
 
-- **Q：Transformer 为什么不用 BatchNorm？**
-  A：Batch 内序列长度不同（padding），统计量不稳；LayerNorm 沿 feature 归一化天然不受影响。
+- **Q：Transformer 为什么通常不用 BatchNorm？**
+  A：核心不是“有 padding 就一定不能用”，padding 可以做 masked statistics；真正的问题是 BN 把同一通道在 batch/token 轴上的样本耦合起来，统计量随 batch size、序列长度组成和数据并行分片变化，训练与自回归推理还要切换到 running statistics。LN/RMSNorm 对每个 token 独立计算，训练与推理路径一致，更适合变长序列和小 micro-batch。
 
 - **Q：RMSNorm 比 LayerNorm 好在哪？**
-  A：少一次操作 → 速度快 ~10%；实证效果相当；LLaMA 系列默认用它。
+  A：它只控制 RMS 尺度，计算路径更简单，并在许多 LLM 上达到相近效果；具体速度与质量差异依赖实现和架构，不能固定成 10%。
 
 ---
 
@@ -403,8 +421,8 @@ $$
 
 ### 面试常见追问
 
-- **Q：为什么 FFN 中间维度是 $4d$？**
-  A：经验最优。理论解释：FFN 提供**特征维度上的非线性扩展**，需要足够大的中间维度才能 hold 住表达能力。
+- **Q：为什么标准 FFN 常取 $4d$？一定是 4 吗？**
+  A：不是定理，而是原始 Transformer 延续下来的容量—计算折中。两层 FFN 参数量约为 $2dd_{ff}$；增大 $d_{ff}$ 会增加逐 token 的非线性特征和记忆容量，也线性增加参数与 FLOPs。$4d$ 是常用基线，具体模型会按总参数预算、门控结构和硬件对齐调整。SwiGLU 有三块矩阵，为保持与 $d_{ff}=4d$ 的普通 FFN 相近的参数量，常取约 $8d/3$，这才是 $8/3$ 的来源。
 
 - **Q：FFN 在 Transformer 里起什么作用？**
   A：Self-Attention 提供**位置间的信息混合**，FFN 提供**位置内的特征变换**。两者互补，缺一不可。
@@ -421,14 +439,16 @@ $$
 | **Decoder-Only** | 单向（因果） | GPT, LLaMA, DeepSeek | 生成、对话 |
 | **Encoder-Decoder** | 双向 + 因果 | T5, BART, mT5 | 翻译、摘要 |
 
-### 为什么现在的 LLM 都是 Decoder-Only？
+### 为什么许多生成式 LLM 选择 Decoder-Only？
 
 1. **统一的 next-token prediction** 范式简单且强大
 2. **Scaling Law** 对 Decoder-Only 最友好
 3. GPT 系列验证了仅 Decoder 就能做好几乎所有任务
 4. **In-Context Learning** 在 Decoder 中涌现
 5. **推理效率高**：KV Cache 天然适配因果注意力
-6. **数据利用率**：每个 token 都是训练信号（双向模型只能用 mask 的 15%）
+6. **训练目标统一**：因果语言建模可在序列中几乎每个非首 token 上产生监督；BERT 式 MLM 通常只在被选中位置计算主要预测损失，但“15%”是具体训练配置，不是所有 Encoder 的固有限制
+
+这不是“Decoder-Only 在所有任务都更优”的证明。Encoder-only 仍适合双向表示和高吞吐理解，Encoder-Decoder 在输入输出职责不同、需要完整编码源序列的任务中也有优势；Decoder-Only 的核心吸引力是用同一接口和训练目标统一多种生成任务。
 
 ---
 
@@ -463,7 +483,9 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 
 ### 主流方法对比
 
-| 特性 | BPE | WordPiece | SentencePiece |
+SentencePiece 是可以承载 BPE 或 Unigram 的**分词框架/实现方式**，并不是与 BPE、WordPiece 同层级的单一合并算法：
+
+| 特性 | BPE | WordPiece | SentencePiece（框架） |
 |---|---|---|---|
 | 合并策略 | 最高频率对 | 最大似然增益 | BPE/Unigram 在句子片段上 |
 | 预分词 | 需要 | 需要 | 不需要（直接处理原始文本） |
@@ -501,8 +523,8 @@ scores = scores.masked_fill(mask == 0, float("-inf"))
 
 ### 追问
 
-- **Q：BPE 一个词元（token）= 几个汉字？**
-  A：英文 LLM 的中文 tokenization 经常 1 个汉字对应 2-3 个 token（按字节切）；中文优化模型基本 1 字 1 token。
+- **Q：BPE 一个 token 等于几个汉字？**
+  A：没有固定换算。结果取决于预分词、字节映射、词表和训练语料；常见汉字可能单独成 token，高频词组也可能合成一个 token，未覆盖字符则可能回退为多个 byte token。面试中应以具体 tokenizer 实测，不能把“1 字 1 token”当作保证。
 
 ---
 
@@ -528,6 +550,12 @@ input ──► Router ─→ Expert 2 ─┼─→ 加权求和
 - **负载均衡**：避免所有 token 都去同一个专家 → 加 **load balancing loss**
 - **训练不稳定**：router 决策是离散的
 - **通信开销**：专家分布在不同 GPU 上，all-to-all 通信
+
+### 为什么稀疏激活能扩参数而不等比例扩 FLOPs？
+
+若有 $E$ 个专家、每个 token 只选 $k$ 个，FFN 的存储参数量随 $E$ 增长，而单 token 的专家计算主要随 $k$ 增长。这实现了“总容量大、激活计算小”。但显存、参数加载、router、token dispatch 和跨卡 all-to-all 不会消失，因此 MoE 不是把稠密模型的成本简单乘上 $k/E$。
+
+负载均衡损失也不是越强越好：太弱会造成热点、溢出和设备空闲；太强会迫使 router 为均衡而牺牲语义路由。工程上还要同时看 expert utilization、capacity factor、dropped-token rate 和通信占比。
 
 ### 代表模型
 
