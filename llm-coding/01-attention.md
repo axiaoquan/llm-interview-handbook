@@ -25,21 +25,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0):
+def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0, training=False):
     """
     Q, K, V: [B, ..., L, d]
-    mask:    [B, ..., L_q, L_k]，值为 1 保留 / 0 屏蔽（或加性 mask 用 -inf）
+    mask: 可广播到 [B, ..., L_q, L_k]；bool True 保留，float 直接加到分数。
+          浮点屏蔽必须用 -inf，不能把浮点 0/1 当布尔 mask。
+    全遮挡 query 的输出约定为 0；Q/K/V 及未遮挡分数需有限。
     """
     d_k = Q.size(-1)
     # [B, ..., L_q, L_k]
     scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(d_k)
 
     if mask is not None:
-        scores = scores.masked_fill(mask == 0, float('-inf'))
+        if mask.dtype == torch.bool:
+            scores = scores.masked_fill(~mask, float('-inf'))
+        elif mask.is_floating_point():
+            scores = scores + mask
+        else:
+            raise TypeError("mask must be bool or floating additive bias")
 
-    attn = F.softmax(scores, dim=-1)               # [B, ..., L_q, L_k]
-    if dropout_p > 0:
-        attn = F.dropout(attn, p=dropout_p)
+    # 先替换全 -inf 行，避免 softmax 生成 NaN，再将其权重置零。
+    empty = torch.isneginf(scores).all(dim=-1, keepdim=True)
+    safe_scores = scores.masked_fill(empty, 0)
+    attn = F.softmax(safe_scores, dim=-1).masked_fill(empty, 0)
+    attn = F.dropout(attn, p=dropout_p, training=training)
 
     out = torch.matmul(attn, V)                    # [B, ..., L_q, d]
     return out, attn
@@ -52,7 +61,8 @@ def scaled_dot_product_attention(Q, K, V, mask=None, dropout_p=0.0):
 - **`masked_fill` 不是 `mask_fill`**（少一个 d）
 - **mask 用 `-inf` 还是 `0`**：填 `-inf`，softmax 后变 0；直接乘 0 会导致归一化错位
 - **softmax 的 `dim`**：必须是 `-1`（key 维度），归一化"每个 query 对所有 key 的注意力分布"
-- **整行都被 mask**：一行全是 `-inf` 时 softmax 会得到 NaN。数据管线应保证每个有效 query 至少能看见一个 key，或在 fused SDPA 中使用正确的布尔 mask 语义
+- **整行都被 mask**：普通 softmax 会得到 NaN；本例显式返回零权重和零输出。padding query 还应从下游 loss 中排除，零 attention 不意味着整个残差块输出为零
+- **dropout 的模式**：函数不能读取外部模块的 `eval()`；调用者必须传 `training=self.training`。官方 SDPA 则需在 eval 时显式传 `dropout_p=0.0`
 
 ---
 
@@ -88,13 +98,10 @@ class MultiHeadAttention(nn.Module):
         V = self.W_v(x_v).view(B, L_k, self.n_heads, self.d_k).transpose(1, 2)
 
         # 2) 计算 attention：[B, h, L_q, d_k]
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        if mask is not None:
-            # mask: [B, 1, L_q, L_k] 或 [B, 1, 1, L_k]，会广播到所有头
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-        attn = F.softmax(scores, dim=-1)
-        attn = self.dropout(attn)
-        out = torch.matmul(attn, V)                # [B, h, L_q, d_k]
+        # 复用 Q01，统一 mask、全遮挡行与 dropout 语义。
+        out, _ = scaled_dot_product_attention(
+            Q, K, V, mask=mask, dropout_p=self.dropout.p, training=self.training
+        )
 
         # 3) 合头 + 输出投影：[B, L_q, d_model]
         out = out.transpose(1, 2).contiguous().view(B, L_q, self.d_model)
@@ -154,12 +161,12 @@ scores = scores.masked_fill(~mask, float('-inf'))
 ```python
 # PyTorch 2.0+ 内置了 causal flag
 out = F.scaled_dot_product_attention(Q, K, V, is_causal=True)
-# 它内部用 Flash Attention 加速，不需要显式构造 [L, L] mask
+# 根据设备、dtype、shape 等选择 Flash/高效/数学后端，不保证总用 Flash。
 ```
 
 ### 易错点
 
-- 训练时 causal mask 是**整个序列一次性算**；推理时配合 KV Cache 是**一次一步**，不需要 mask（因为只算最后一个 token 对前面的 attention）
+- 单 token decode 仅当所有 key 都是有效的过去/当前 token 时可省 causal mask；padding 仍需屏蔽。多 token prefill/chunked decode 必须保留因果约束；不等长 Q/K 不能盲目套用普通左上对齐三角 mask
 - **不要把 padding mask 跟 causal mask 搞混**：padding mask 是把 `<pad>` 位置屏蔽，causal mask 是屏蔽未来；两个要**逻辑与**结合
 
 ```python
@@ -183,6 +190,7 @@ class GroupedQueryAttention(nn.Module):
     def __init__(self, d_model: int, n_q_heads: int, n_kv_heads: int):
         super().__init__()
         assert n_q_heads % n_kv_heads == 0, "n_q_heads must be divisible by n_kv_heads"
+        assert d_model % n_q_heads == 0, "d_model must be divisible by n_q_heads"
         self.n_q_heads = n_q_heads
         self.n_kv_heads = n_kv_heads
         self.n_rep = n_q_heads // n_kv_heads     # 每个 KV 头被几个 Q 头共享
@@ -204,11 +212,7 @@ class GroupedQueryAttention(nn.Module):
         K = K.repeat_interleave(self.n_rep, dim=1)   # [B, n_q, L, d_k]
         V = V.repeat_interleave(self.n_rep, dim=1)
 
-        scores = (Q @ K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        if mask is not None:
-            scores = scores.masked_fill(mask == 0, float('-inf'))
-        attn = F.softmax(scores, dim=-1)
-        out = attn @ V
+        out, _ = scaled_dot_product_attention(Q, K, V, mask=mask)
 
         out = out.transpose(1, 2).contiguous().view(B, L, -1)
         return self.W_o(out)
@@ -233,6 +237,7 @@ class GroupedQueryAttention(nn.Module):
 class CachedAttention(nn.Module):
     def __init__(self, d_model, n_heads):
         super().__init__()
+        assert d_model % n_heads == 0
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
         self.W_q = nn.Linear(d_model, d_model, bias=False)
@@ -240,15 +245,19 @@ class CachedAttention(nn.Module):
         self.W_v = nn.Linear(d_model, d_model, bias=False)
         self.W_o = nn.Linear(d_model, d_model, bias=False)
 
-    def forward(self, x, kv_cache=None):
+    def forward(self, x, kv_cache=None, key_padding_mask=None):
         """
         x: [B, L_new, d_model]
             训练 / prefill 阶段：L_new = 完整序列长度
             decode 阶段：       L_new = 1
         kv_cache: dict 或 None
             { 'K': [B, h, L_past, d_k], 'V': [B, h, L_past, d_k] }
+        key_padding_mask: bool [B, L_past + L_new]，True 表示有效 key。
+        本例不含位置编码；若加 RoPE，须用 cache offset 旋转新 Q/K。
         """
         B, L_new, _ = x.shape
+        if kv_cache is not None and (('K' in kv_cache) != ('V' in kv_cache)):
+            raise ValueError("cache must contain both K and V")
 
         Q = self.W_q(x).view(B, L_new, self.n_heads, self.d_k).transpose(1, 2)
         K_new = self.W_k(x).view(B, L_new, self.n_heads, self.d_k).transpose(1, 2)
@@ -266,11 +275,16 @@ class CachedAttention(nn.Module):
             kv_cache['K'] = K
             kv_cache['V'] = V
 
-        # 单 token decode 且 cache 只含过去+当前时不需要 causal mask。
-        # 若一次解多个新 token（L_new > 1），仍需块状 causal mask，避免新 token 互相看未来。
-        scores = (Q @ K.transpose(-2, -1)) / math.sqrt(self.d_k)
-        attn = F.softmax(scores, dim=-1)
-        out = attn @ V
+        L_total = K.size(2)
+        L_past = L_total - L_new
+        query_pos = L_past + torch.arange(L_new, device=x.device)
+        key_pos = torch.arange(L_total, device=x.device)
+        allowed = key_pos[None, :] <= query_pos[:, None]  # [L_new, L_total]
+        if key_padding_mask is not None:
+            if key_padding_mask.dtype != torch.bool or key_padding_mask.shape != (B, L_total):
+                raise ValueError("key_padding_mask must be bool [B, L_total]")
+            allowed = allowed & key_padding_mask[:, None, None, :]
+        out, _ = scaled_dot_product_attention(Q, K, V, mask=allowed)
 
         out = out.transpose(1, 2).contiguous().view(B, L_new, -1)
         return self.W_o(out), kv_cache
@@ -280,28 +294,40 @@ class CachedAttention(nn.Module):
 
 ```python
 @torch.no_grad()
-def generate(model, prompt_ids, max_new_tokens=50):
+def generate(model, prompt_ids, max_new_tokens=50, eos_id=None, pad_id=None):
+    """教学接口：model(ids, kv_cache) 返回 (logits, cache)。prompt 等长且无 padding。"""
+    if max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be nonnegative")
+    if max_new_tokens == 0:
+        return prompt_ids
+    if prompt_ids.size(1) == 0:
+        raise ValueError("prompt must be nonempty")
     kv_cache = {}
-    # Prefill：一次性处理整个 prompt
-    logits, kv_cache = model(prompt_ids, kv_cache=kv_cache)
-    next_id = logits[:, -1].argmax(-1, keepdim=True)
-    out_ids = [next_id]
-
-    # Decode：每次只喂一个 token
-    for _ in range(max_new_tokens - 1):
-        logits, kv_cache = model(next_id, kv_cache=kv_cache)
+    finished = torch.zeros(prompt_ids.size(0), dtype=torch.bool, device=prompt_ids.device)
+    fill_id = eos_id if pad_id is None else pad_id
+    out_ids = [prompt_ids]
+    current = prompt_ids
+    for _ in range(max_new_tokens):
+        # 首次 prefill，之后仅传新 token；每层 cache 应由 model 管理。
+        logits, kv_cache = model(current, kv_cache=kv_cache)
         next_id = logits[:, -1].argmax(-1, keepdim=True)
+        if eos_id is not None:
+            next_id = torch.where(finished[:, None], fill_id, next_id)
+            finished |= next_id.squeeze(-1).eq(eos_id)
         out_ids.append(next_id)
-        if next_id.item() == EOS_ID:
+        if eos_id is not None and finished.all():
             break
-    return torch.cat([prompt_ids, *out_ids], dim=1)
+        current = next_id
+    return torch.cat(out_ids, dim=1)
 ```
 
 ### 易错点
 
 - **位置编码要小心**：用 RoPE 时，新 token 的位置 = `L_past + i`，不能从 0 重新编
 - **显存增长**：KV Cache 大小 = `2 × n_layers × n_kv_heads × L × d_k × dtype`，长上下文很恐怖（GQA / MQA / PagedAttention 就是为了解决这个）
-- **batch 维度的 pad**：批量推理时不同样本进度不同，需要在每步把已完成的样本剔除（continuous batching）
+- **batch 的结束状态**：本例保留 finished 行并填 pad/EOS，逻辑正确但仍有无效计算；生产系统可压缩活跃 batch，配套重排 cache。有 padding 的 prompt 还需完整 attention mask 与 position_ids，不能直接使用本例生成接口
+
+生成前调用 `model.eval()`；`no_grad()` 只关闭梯度，不会关闭 dropout。KV cache 是推理状态，不应跨独立样本或训练 batch 复用。底层接口参考 [PyTorch SDPA](https://docs.pytorch.org/docs/2.8/generated/torch.nn.functional.scaled_dot_product_attention.html)。
 
 ### 性能对比
 

@@ -264,6 +264,12 @@ clip 不是把梯度永远限制在固定范围，而是在样本会推动策略
 - $\lambda$ 大：偏差更小、方差更大；
 - LLM 常只有序列末端 outcome reward，需要把回报分配到生成 token。
 
+这里的 $r_t$ 是环境奖励，不是上一节同名的重要性比率。GAE 可反向递推为 $\hat A_t=\delta_t+\gamma\lambda\hat A_{t+1}$，不用显式展开每个后缀；$\lambda=0$ 只用一步 TD 残差，$\lambda=1$ 在完整终止轨迹上连成 Monte Carlo 回报减去当前 value。偏差/方差取舍还取决于 value 误差，不是任意环境下的严格大小排序。来源：[GAE 原论文](https://arxiv.org/abs/1506.02438)。
+
+**真正终止与采样截断要分开**：真正终止（例如任务定义中的 EOS）之后 value 置零；仅因 rollout 长度限制而截断、但任务本可继续时，应考虑用截断处 value bootstrap。递推不能跨到下一条回答；padding 也不能参与。如果把“到达长度上限”定义为带惩罚的任务终止，则按该任务定义处理，而不是机械地总 bootstrap 或总清零。
+
+手算：奖励 `[0,1]`，value 为 `[0.2,0.4]`，最终终止，取 γ=λ=1。末步 δ=1−0.4=0.6，前一步 δ=0+0.4−0.2=0.2，因此优势为 `[0.8,0.6]`，恰好是各位置未来回报减去 value。
+
 ### KL 约束
 
 常见目标：
@@ -372,6 +378,26 @@ r(x,y)=
 ### 为什么不用 Critic？
 
 PPO 用 $V(s_t)$ 作为 baseline；GRPO 用同 prompt 多次 rollout 的经验均值作为 baseline。这样省掉一个与 policy 规模接近的价值模型，但代价是每个 prompt 需要多次采样。
+
+### 为什么减 baseline？包含自身奖励会怎样？
+
+先看固定 prompt 的序列级 REINFORCE。对不依赖当前采样回答 y 的 baseline $b(x)$，在求 policy 梯度时把 b 当固定值：
+
+```math
+\mathbb{E}_{y\sim\pi_\theta}[b(x)\nabla_\theta\log\pi_\theta(y\mid x)]
+=b(x)\nabla_\theta\sum_y\pi_\theta(y\mid x)=0
+```
+
+因此减去这样的 baseline 不改变期望梯度；合适的 baseline 可减少方差，但并非任意 baseline 都降方差。value 网络若共享参数，也要在 actor loss 中 detach advantage，避免多出对 baseline 的求导项。
+
+组均值包含自身 reward，与当前样本不是独立的。设同一 prompt 下 G 条回答独立同策略采样，奖励不显含 θ；忽略标准差归一化、clipping 与长度加权时：
+
+```math
+\mathbb{E}[(r_i-\bar r)\nabla\log\pi(y_i)]
+=\left(1-\frac1G\right)\mathbb{E}[r_i\nabla\log\pi(y_i)]
+```
+
+也就是说，普通自包含均值带来 `(G−1)/G` 的缩放。Leave-one-out 则用其他 G−1 个奖励平均，条件于 prompt 时与当前回答独立，可消除这一因素。再除以随机组内标准差会引入额外重加权，不能把 GRPO 笼统说成“原始 REINFORCE 的无偏梯度”。例：奖励 `[0,2]`，自包含均值优势为 `[-1,1]`，LOO 为 `[-2,2]`。参考 [RLOO 研究](https://arxiv.org/abs/2402.14740)。
 
 ### 什么任务适合 GRPO？
 
@@ -498,7 +524,7 @@ s_i(\theta)=
 A_i=\sum_{k=1}^{K}w_k\hat A_{i,k}
 ```
 
-再做批次级稳定化，从而更完整地保留各维奖励差异。
+再做批次级稳定化，改变各维奖励对训练信号的相对贡献，减少某个原始尺度过大的维度主导更新。但最后仍然是标量加权和，不能无损保留多目标向量：不同向量仍可能抵消成相同优势，也不保证每个维度同时改善。安全/格式等硬约束若不可被其他高分补偿，应单独设计门控或约束，而非期待标准化自动保证。
 
 ### 三类改进放在一起看
 

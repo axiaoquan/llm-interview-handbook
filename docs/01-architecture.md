@@ -237,21 +237,22 @@ class MultiHeadAttention(nn.Module):
 | **MHA** | 标准多头 | $h$ | $h$ | 大 | GPT-2, BERT |
 | **MQA** | 多查询注意力 | $h$ | $1$ | 最小 | PaLM, Falcon |
 | **GQA** | 分组查询注意力 | $h$ | $g$（$1 < g < h$） | 中等 | LLaMA-2 70B, LLaMA-3 |
-| **MLA** | 多头潜在注意力 | $h$ | 压缩到低维潜在空间 | 最小 | DeepSeek-V2/V3 |
+| **MLA** | 多头潜在注意力 | $h$ | 压缩到低维潜在空间 | 取决于压缩维与位置分量 | DeepSeek-V2/V3 |
 
 ### MLA 原理（DeepSeek-V2）
 
-- 把 KV 压缩到低维潜在空间 $c_t = X W_{DKV}$
-- 推理时只缓存低维 $c_t$，需要时用解耦矩阵投影回来
-- KV Cache 减少 **~93.3%**
+采用列向量记号：输入 $h_t$ 经下投影得到共享潜变量 $c_t=W^{DKV}h_t$，各头的内容 key/value 再从 $c_t$ 投影。解耦 RoPE 将内容与位置子空间**拼接**，不是逐元素相加：
 
-**解耦的相对位置编码**：MLA 把 $K$ 分解为
+```math
+k_{t,i}=[k^C_{t,i};k^R_t],\qquad
+q_{t,i}=[q^C_{t,i};q^R_{t,i}]
+```
 
-$$
-K_i = K_i^{\text{content}} + K_i^{\text{position}}
-$$
+其中 $k^R_t=\mathrm{RoPE}(W^{KR}h_t,t)$，既依赖输入内容也依赖位置，不是只由位置编号生成。点积因此分成内容项与位置项：$(q^C)^\top k^C+(q^R)^\top k^R$；缩放维度应是拼接后 Q/K 的总维数。
 
-$K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ 直接由位置编码生成，避免对压缩向量做复杂旋转。
+若内容 key 为 $W^{UK}_i c_t$，则 $(q^C)^\top W^{UK}_i c_t=((W^{UK}_i)^\top q^C)^\top c_t$。推理可将上投影吸收到 query 侧，value 上投影也可与输出投影合并，避免物化完整的历史 KV。若直接在内容 key 上施加随位置变化的旋转，这种固定权重吸收会受到阻碍，因此单独保留位置分支。
+
+缓存包含 **$c_t$ 和旋转后的位置 key $k^R_t$**，每层每 token 的元素数为 $d_c+d_R$，不是只有 latent，也不是固定省某个比例。减少多少应与同一基线的 KV 头数和维度比较。来源：[DeepSeek-V2 第 2.1 节](https://arxiv.org/html/2405.04434v5)。
 
 ### 面试常见追问
 
@@ -267,7 +268,7 @@ $K_i^{\text{content}}$ 来自潜在向量 $c$ 投影，$K_i^{\text{position}}$ �
 
 ### 为什么需要位置编码？
 
-不带位置编码的 Self-Attention 对序列置换是**置换等变**的：输入按同一置换重排，输出也只会按相同方式重排；若再做 pooling 才表现为置换不变。它只能识别 token 的内容和集合关系，不能区分“AB”与“BA”，所以必须注入位置信息。
+不带位置编码、且没有固定位置 mask 的全连接 Self-Attention 对序列置换是**置换等变**的：输入重排，输出相应重排；再做对称 pooling 才成为置换不变。固定 causal mask 本身已包含顺序约束，不能对它直接套用任意置换等变的结论。位置编码进一步提供位置/距离信息，让模型不仅依赖内容匹配与可见范围。
 
 ### 三大流派
 
@@ -307,7 +308,7 @@ $$
 \langle R_m q,\ R_n k \rangle = q^T R_m^T R_n k = q^T R_{n-m} k
 $$
 
-→ 内积**只和 $n - m$ 有关**，天然带相对位置信息。
+→ 位置旋转项只通过 $n-m$ 起作用，但内积仍依赖内容向量 $q,k$，不能说整个 attention 分数只依赖距离。
 
 实际实现：把向量两两分组，每组做 2D 旋转，不同组用不同频率。
 
@@ -352,15 +353,41 @@ $$
 
 LayerNorm 的均值、方差由当前 token 的特征即时计算，**不是可学习参数**；真正可学习的是逐特征的缩放 $\gamma\in\mathbb{R}^d$ 和偏移 $\beta\in\mathbb{R}^d$。标准化把每个 token 压到统一的一阶、二阶统计，但不同通道未必都应该保持单位尺度、零中心。仿射参数让网络在保留稳定性的同时，重新学习每个通道合适的幅值和基线；必要时甚至能恢复标准化前后续层所需的尺度。
 
-BatchNorm 也是同样的 $\gamma、\beta$ 设计，只是统计轴不同。它的 batch mean/variance 是当前 batch 的统计量，running mean/variance 是推理用 buffer，二者都不通过梯度学习。$\gamma=1、\beta=0$ 仅表示初始化时“不额外缩放或平移标准化结果”，**不代表整个归一化层是恒等映射**。
+BatchNorm 也是同样的 $\gamma、\beta$ 设计，只是统计轴不同。batch mean/variance 不是独立可学习参数，但训练时仍在计算图内，反向传播必须考虑它们对输入的依赖；running mean/variance 才是以滑动统计更新的 buffer。$\gamma=1、\beta=0$ 仅表示“不额外缩放或平移标准化结果”，**不代表整个归一化层是恒等映射**。固定仿射参数也不能恢复每个样本原来不同的均值和方差。
+
+### 为什么 LN 用有偏方差？BN、RMSNorm 也一样吗？
+
+先区分两个目标：描述当前这组数的离散程度，与用随机样本估计未知总体方差。LN 用前者归一化当前向量，不以总体方差的无偏估计为目标。设统计轴有 $n$ 个元素：
+
+```math
+\mu=\frac1n\sum_i x_i,\qquad
+v_n=\frac1n\sum_i(x_i-\mu)^2
+```
+
+若把 $x_i$ 看作同分布独立样本，则 $E[v_n]=(n-1)\sigma^2/n$；因为用这些样本估计了均值，偏差残差之和为零，损失一个自由度。除以 $n-1$ 可在这些假设下无偏估计总体方差。但特征维并不天然是某个总体的独立同分布抽样；“无偏”也不等于归一化效果更好。
+
+忽略 epsilon 且 $v_n>0$，用 $\sqrt{v_n}$ 归一化后，当前向量的均方偏差为 1；若改用 $v_{n-1}$，则为 $(n-1)/n$。两种计算都能定义，不是另一种无法反传，而是采用不同尺度约定。实际 LN 的仿射前均方偏差为 $v_n/(v_n+\epsilon)$，仿射后也不保证零均值、单位方差。
+
+| 层 / 用途 | 统计量 | 关键区别 |
+|---|---|---|
+| LN，训练与推理 | 中心方差，除以 n | 都使用当前输入的统计量 |
+| PyTorch BN，训练前向 | 中心方差，除以 n | 用于归一化当前 batch |
+| PyTorch BN，更新 running_var | 使用除以 n−1 的方差估计更新滑动平均 | 默认推理用历史统计，不等于历史平均始终严格无偏 |
+| RMSNorm，训练与推理 | 均方 `mean(x²)` | 不减均值，不能称为“有偏方差” |
+
+RMSNorm 的均方满足 $\frac1n\sum_i x_i^2=v_n+\mu^2$。它控制相对原点的幅值，不只控制围绕均值的波动，因此不需要为“估计均值”作贝塞尔校正。
+
+例：$x=[1,3]$，均值为 2，有偏方差为 1，无偏方差为 2，均方为 5。忽略 epsilon 与仿射，LN 输出 `[-1,1]`，RMSNorm 输出 $[1,3]/\sqrt5$，两者含义不同。常量向量的 LN 标准化输出为零，epsilon 防止除零；$n=1$ 时 LN 也有定义，而除以 $n-1$ 不成立。
+
+这里 n 是**统计轴的元素数**：二维 BN 为 B，图像 BN 通常为 B×H×W；LN 可对指定尾部多维归一化，并非框架只能处理最后一维。具体行为及实现见 [PyTorch LN](https://docs.pytorch.org/docs/2.8/generated/torch.nn.LayerNorm.html)、[BN](https://docs.pytorch.org/docs/2.8/generated/torch.nn.BatchNorm1d.html)、[Norm 手撕](../llm-coding/03-normalization.md)。
 
 ### Pre-Norm vs Post-Norm
 
 | | Post-Norm（原始 Transformer） | Pre-Norm（GPT-2 / LLaMA） |
 |---|---|---|
 | 公式 | $\mathrm{LN}(x + \text{SubLayer}(x))$ | $x + \text{SubLayer}(\mathrm{LN}(x))$ |
-| 表达能力 | 理论更强 | 略弱 |
-| 训练稳定性 | 差，需要 warmup | **好**（残差路径无变换） |
+| 梯度路径 | 恒等支路也经过 LN Jacobian | 含不经过子层与 LN 的直接恒等项 |
+| 训练稳定性 | 深层时通常更依赖初始化、warmup 与残差缩放 | 常更易训练，但不保证任意深度稳定 |
 | 实际选择 | 旧架构 | **现代大模型首选** |
 
 ### RMSNorm（LLaMA 使用）
@@ -381,7 +408,7 @@ $$
 | 归一化维度 | 每通道跨 batch（及空间/时间轴） | 每个样本/token 的 feature 维 |
 | 依赖 batch size | 是 | 否 |
 | 适用场景 | CV | NLP / Transformer |
-| 推理时 | 需要 running stats | 直接计算 |
+| 推理时 | 默认使用 running stats；关闭追踪时仍用 batch stats | 直接计算 |
 
 ### 面试常见追问
 

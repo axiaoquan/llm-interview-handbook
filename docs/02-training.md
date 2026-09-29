@@ -30,6 +30,40 @@ $$
 L = -\sum_i y_i \log \hat{y}_i
 $$
 
+### 为什么是负对数：从最大似然到交叉熵
+
+给定上下文 $x$ 和观测回答 $y$，自回归模型用链式法则分解序列概率。这不是假设 token 彼此独立，而是每一步都条件于之前的 token：
+
+```math
+p_\theta(y\mid x)=\prod_{t=1}^{T}p_\theta(y_t\mid x,y_{1:t-1})
+```
+
+训练希望提高观测数据的似然。log 严格单调，最大化 log 似然与最大化似然具有相同最优解；log 将连乘变成求和，负号再将最大化转为最小化：
+
+```math
+L=-\log p_\theta(y\mid x)
+  =-\sum_{t=1}^{T}\log p_\theta(y_t\mid x,y_{1:t-1})
+```
+
+对一个位置，one-hot 标签 $q$ 让 $-\sum_j q_j\log p_j$ 只剩 $-\log p_y$。对软标签，它是目标分布下的负 log 概率期望。由 $H(q,p)=H(q)+D_{KL}(q\Vert p)$，固定目标 $q$ 时，最小化 CE 等价于最小化该方向的 KL；不是说 CE 本身总等于 KL。有限样本的 one-hot 是一次观测，也不代表该上下文只有唯一合理续写。
+
+### 为什么和 softmax 配合？梯度从哪里来？
+
+softmax 将任意实数 logits 转为归一化类别概率。令 $p_j=e^{z_j}/\sum_k e^{z_k}$，且 $\sum_j q_j=1$：
+
+```math
+L=\log\sum_k e^{z_k}-\sum_j q_jz_j,
+\qquad \frac{\partial L}{\partial z_j}=p_j-q_j
+```
+
+第一项导数是 softmax，第二项导数是目标概率，因此梯度恰好是“预测减目标”。提高所有 logits 同一个常数不会改变 softmax 或 loss；真正重要的是类别之间的相对分数。
+
+例：真实类概率从 0.9 降至 0.1，loss 从约 0.105 增至 2.303。二分类真值为 1、$p=0.001$ 时，CE 对 logit 的梯度为 $p-1=-0.999$；若用半平方误差 $\frac12(p-1)^2$，梯度是 $(p-1)p(1-p)\approx-0.000998$。额外的 sigmoid 导数使“错得很自信”的平方损失更新较弱。
+
+这不意味着 MSE 不能分类。**对 token ID 做回归**会引入编号之间没有语义的距离；**对 one-hot 概率做平方损失**则是有效的 Brier 类评分。CE 是类别似然的自然选择，且与 softmax 组合后没有额外的饱和导数因子。
+
+数值实现使用 `log_softmax` 或稳定的 log-sum-exp：减去最大 logit 后再指数求和。`F.cross_entropy` 接收原始 logits，不要先 softmax 再传入，否则相当于把概率再次当 logits。完整推导背景见 [Deep Learning 第六章](https://www.deeplearningbook.org/contents/mlp.html)；实现见 [Loss 手撕 Q01](../llm-coding/07-loss-rl.md#q01--cross-entropy-lossnext-token-prediction)。
+
 ### 2) 回归问题
 
 | 损失 | 公式 | 特点 |
@@ -40,12 +74,14 @@ $$
 
 ### 3) Label Smoothing
 
-把硬 one-hot 标签软化成 $(1-\epsilon, \epsilon/(K-1), \ldots)$，**抑制过度置信**并给非目标类别提供梯度。$\epsilon=0.1$ 是分类任务常见起点，但因果语言模型并非默认都使用：词表极大且标签本身存在多解时，它可能改善校准，也可能削弱对正确 token 的峰值概率、影响生成质量。应把它当超参数而不是 LLM 固定配置。
+将目标与均匀分布混合：$q_j=(1-\epsilon)\mathbb{1}[j=y]+\epsilon/K$，这是 [PyTorch `label_smoothing`](https://docs.pytorch.org/docs/2.8/generated/torch.nn.CrossEntropyLoss.html) 的约定。另一种约定把正确类设为 $1-\epsilon$，其余各分 $\epsilon/(K-1)$；相同 ε 下两者不同。三分类 ε=0.1 时，分别为 `[0.9333,0.0333,0.0333]` 和 `[0.9,0.05,0.05]`。
+
+软化标签可抑制过度置信，但普通 CE 已经会给非目标 logits 梯度，不能说只有 smoothing 才提供这种梯度。ε=0.1 只是分类任务常见起点，不是因果语言模型固定配置；应验证校准和生成质量。
 
 ### 追问
 
 - **Q：为什么 LLM 用交叉熵不用 MSE？**
-  A：CE 是分布间 KL 散度的等价形式，匹配概率分布的语义；MSE 假设高斯，不适合离散 token。
+  A：CE 来自类别分布的最大似然；与 softmax 配合得到 $p-q$ 梯度。对概率使用 MSE 也可分类，但经过 softmax Jacobian 后可能在饱和区更新较弱；不能把任意 token 编号当连续回归目标。
 
 - **Q：分类用 MSE 会怎么样？**
   A：和 sigmoid/softmax 配对时容易梯度消失；CE 与之配对梯度形式简洁（$\hat{y} - y$）。

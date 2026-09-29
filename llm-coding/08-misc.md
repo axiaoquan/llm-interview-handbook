@@ -70,12 +70,14 @@ class MoELayer(nn.Module):
 
 ### 易错点
 
-1. **router 口径要说清楚**：可以先取 top-k 再在选中专家内 softmax，也可以先对全专家 softmax、取 top-k 后重新归一化；两者梯度和分数尺度不同，并非后者必然更差，应与论文/实现保持一致
+1. **router 口径要说清楚**：先 top-k 再 softmax，与全量 softmax 后取相同 top-k 再归一化，在无额外变换、无 detach、选中集合固定时，输出与梯度数学等价；有限精度可能造成误差。真正不同的是不再归一化、改变 gate 函数、截断梯度或加入其他损失
 2. **`index_add_` in-place**：累加，不是赋值
 3. **GPU 利用率**：朴素实现的 `for e in n_experts` 串行；生产用 grouped GEMM 一次算完
 4. **专家容量限制**：实际系统常限制每个专家接收的 token 数（capacity factor）；溢出 token 可丢弃专家分支、重路由或走共享/残差路径，策略取决于实现，不能默认都直通
 
 Top-k 的离散选择使未入选专家通常拿不到主任务梯度，容易形成“早期热门专家得到更多训练、因而更热门”的正反馈。负载均衡 loss、router noise、容量控制和 shared experts 都是在解决这个闭环，但约束过强又会牺牲语义专门化。
+
+为什么等价？对选中集合 S，全量 softmax 的公共分母会在再次归一化时约掉，最终都是 $e^{z_i}/\sum_{j\in S}e^{z_j}$。只要没有并列导致选中集合变化，梯度也一致。特别地，本例 `top_k=1` 时唯一权重恒为 1，主任务无法通过该权重训练 router；这不是所有 top-1 MoE 都有的问题，保留未再归一化的全量概率、辅助损失等设计会改变梯度路径。
 
 ---
 
@@ -173,10 +175,10 @@ def flash_attention_simplified(Q, K, V, block_size=64):
 
 ```python
 class TiedLM(nn.Module):
-    def __init__(self, vocab_size, d_model):
+    def __init__(self, vocab_size, d_model, transformer):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, d_model)
-        self.transformer = ...                           # 你的 transformer block
+        self.transformer = transformer  # 调用者传入 [..., D] -> [..., D] 的因果模块
         # LM head 不创建新参数，复用 embed 的权重
         # 不需要单独的 self.lm_head
 
@@ -193,6 +195,8 @@ class TiedLM(nn.Module):
 - **优点**：节省 vocab_size × d_model 个参数，并让“读入 token 的语义空间”和“预测 token 的分类空间”共享几何结构
 - **约束**：输入 embedding 与输出 classifier 被迫共享同一矩阵，可能限制两者各自最优表示；效果可能提升也可能下降，不存在固定 0.5 PPL 结论
 - **HuggingFace 的实现**：许多模型配置提供 `tie_word_embeddings`；默认值取决于具体架构
+
+这是依赖外部 block 的组件，不是完整语言模型。传 `nn.Identity()` 可以验证 embedding/head 共享与输出 shape，但没有上下文建模能力；真实自回归训练需传带因果约束的 Transformer。
 
 ---
 

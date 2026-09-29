@@ -132,6 +132,7 @@ class Solution:
 如果数值无限制，用 `set`：
 
 ```python
+# 片段：放在交集函数内部，不是独立程序。
 return list(set(nums1) & set(nums2))
 ```
 

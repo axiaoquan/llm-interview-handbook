@@ -76,7 +76,7 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
 ### LLaVA 极简架构
 
 ```
-图像 → ViT (CLIP-Large) → 投影 (MLP) → LLaMA
+图像 → ViT (CLIP) → Projector → 语言模型
                                         ↑
                               文本 tokens
 ```
@@ -86,14 +86,16 @@ Q-Former 用一组**可学的 query token**（默认 32 个）通过 cross-atten
 ### 训练两阶段
 
 1. **Stage 1（Pretrain）**：只训投影层，用图文 pair 数据对齐
-2. **Stage 2（Instruct Tuning）**：训投影层 + LLM，用 GPT-4V 生成的多模态指令数据
+2. **Stage 2（Instruct Tuning）**：训投影层 + LLM。原始 LLaVA 使用 language-only GPT-4，以图像 captions、目标类别/边界框等文字化信息生成指令数据，并非让 GPT-4V 直接看图生成
+
+不要把版本混成一个模型：原始 LLaVA 使用线性 projector；LLaVA-1.5 使用两层 MLP projector 和更高分辨率配置。视觉 token 数随分辨率、patch size 与裁剪策略变化，576 不是所有 LLaVA 的固定值。见[原始 LLaVA](https://arxiv.org/abs/2304.08485) 与 [LLaVA-1.5](https://arxiv.org/abs/2310.03744)。
 
 ### LLaVA vs BLIP-2
 
 | | LLaVA | BLIP-2 |
 |---|---|---|
-| 视觉 token 数 | 全部（576） | 压缩到 32 |
-| 视觉 → LLM | MLP | Q-Former |
+| 视觉 token 数 | 保留 patch token；如 336/14 配置为 24×24=576 | 原论文典型配置为 32 个 query |
+| 视觉 → LLM | 原始版线性；1.5 为 MLP | Q-Former 加投影 |
 | 优点 | 简单、信息全 | token 少、推理快 |
 | 缺点 | 输入 token 多 | 信息有损 |
 

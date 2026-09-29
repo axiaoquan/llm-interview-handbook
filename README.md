@@ -87,6 +87,16 @@
 
 ---
 
+## 为什么这样设计：重点追问
+
+- [LoRA 初始化能否反过来？首步梯度和有效更新有什么不同？](docs/03-fine-tuning.md#q01--lora-原理)
+- [交叉熵为什么取负对数？为什么梯度是预测减目标？](docs/02-training.md#q01--损失函数)
+- [LN 的方差为什么除以 n？BN 与 RMSNorm 有何区别？](docs/01-architecture.md#q06--layernorm--rmsnorm--prepost-norm)
+- [KV Cache 如何避免未来信息泄漏？](llm-coding/01-attention.md#q05--kv-cache-推理加速)
+- [GRPO 按回答平均和按 token 平均为何不同？](llm-coding/07-loss-rl.md#q05--grpo)
+
+本地验证方法和覆盖边界见 [测试说明](tests/README.md)。
+
 ## 贡献
 
 欢迎 Issue / PR，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。

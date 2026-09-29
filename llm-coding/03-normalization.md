@@ -36,10 +36,11 @@ class LayerNorm(nn.Module):
 
     def forward(self, x):
         """x: [..., d_model]"""
-        mean = x.mean(dim=-1, keepdim=True)                          # [..., 1]
-        var = x.var(dim=-1, keepdim=True, unbiased=False)            # [..., 1]
-        x_hat = (x - mean) / torch.sqrt(var + self.eps)
-        return x_hat * self.gamma + self.beta
+        stats = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
+        mean = stats.mean(dim=-1, keepdim=True)                     # [..., 1]
+        var = stats.var(dim=-1, keepdim=True, unbiased=False)        # [..., 1]
+        x_hat = (stats - mean) * torch.rsqrt(var + self.eps)
+        return (x_hat * self.gamma + self.beta).to(x.dtype)
 ```
 
 ### 易错点
@@ -47,7 +48,9 @@ class LayerNorm(nn.Module):
 1. **`unbiased=False`**：用有偏方差（除以 n 而不是 n-1），跟 PyTorch 官方实现一致
 2. **`keepdim=True`**：保留维度方便广播，否则形状对不上
 3. **gamma 初始化为 1，beta 初始化为 0**：初始时不再额外缩放或平移标准化结果；LN 仍会减均值、除标准差，因此并不是恒等映射
-4. **dim=-1**：永远在最后一维（特征维），不要写 `dim=0`
+4. **dim=-1**：本例只实现最后一维；官方 `normalized_shape` 可以指定尾部多维，不能说 LN 永远只统计一维
+
+为什么除以 n？我们要标准化当前向量，不是在要求总体方差的无偏估计。若忽略 epsilon 且方差非零，除以有偏标准差后当前向量的均方偏差为 1；改成无偏标准差则为 `(n-1)/n`。详细推导和 `[1,3]` 手算例子见 [Norm 原理](../docs/01-architecture.md#q06--layernorm--rmsnorm--prepost-norm)。`mean/var` 不是可学习参数，但依赖输入，不能 detach，否则输入梯度不再等于真正的 LN。
 
 ### $\gamma、\beta$ 为什么可学习？
 
@@ -79,29 +82,30 @@ class RMSNorm(nn.Module):
 
     def forward(self, x):
         """x: [..., d_model]"""
-        # rsqrt = 1 / sqrt，PyTorch 内置更快更稳
-        rms = x.pow(2).mean(dim=-1, keepdim=True)
-        x_hat = x * torch.rsqrt(rms + self.eps)
-        return x_hat * self.gamma
+        # 低精度输入用 FP32 归约；保留 float64 以支持精确梯度检查。
+        stats = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
+        mean_square = stats.square().mean(dim=-1, keepdim=True)
+        x_hat = stats * torch.rsqrt(mean_square + self.eps)
+        return (x_hat * self.gamma).to(x.dtype)
 ```
 
 ### 易错点
 
 - **没有 beta**：只学一个 gamma，参数量减半
 - **不减均值**：直接除 RMS，省去均值中心化；实际加速取决于是否有 fused kernel 和内存访问，不能固定说省某个百分比
-- **`rsqrt` 比 `1/sqrt` 更快**：PyTorch 底层 fused kernel
+- **`rsqrt` 是倒数平方根**：是否比拆开的算子更快取决于设备、编译与融合，不能仅由写法保证
 - **混合精度**：平方和/均值等归约通常用 FP32 累积更稳；手写实现可显式升精度，生产 fused kernel 也可能内部完成，因此不是所有代码都必须先 `x.float()`
 
 ```python
 def forward(self, x):
     dtype = x.dtype
-    x = x.float()                                           # 手写版显式用 FP32 归约
+    x = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
     rms = x.pow(2).mean(dim=-1, keepdim=True)
     x_hat = x * torch.rsqrt(rms + self.eps)
     return (x_hat * self.gamma).to(dtype)                   # ← 算完转回去
 ```
 
-RMSNorm 保留输入方向并只控制向量的 RMS 尺度，具有重缩放不变性；它没有显式平移不变性。省去 $\beta$ 是常见架构选择而非数学强制，有些实现也可以额外加入 bias。
+RMSNorm 在仿射前用一个正标量缩放向量，因此保留非零输入的方向；逐通道 gamma 之后不一定保持方向。忽略 epsilon 时对正比例缩放不变，有 epsilon 时只是近似性质；不具有平移不变性。其 `mean(x²)` 是均方，不是“有偏方差”，不要改成除以 n−1。省去 beta 是常见架构选择而非数学强制。
 
 ---
 
@@ -131,18 +135,26 @@ class BatchNorm1d(nn.Module):
 
     def forward(self, x):
         """x: [B, C]"""
+        if x.ndim != 2:
+            raise ValueError("teaching implementation expects [B, C]")
+        stats = x.float() if x.dtype in (torch.float16, torch.bfloat16) else x
         if self.training:
-            mean = x.mean(dim=0)                            # [C]
-            var = x.var(dim=0, unbiased=False)              # [C]
-            # 更新 running stats
-            self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * mean.detach()
-            self.running_var = (1 - self.momentum) * self.running_var + self.momentum * var.detach()
+            n = x.size(0)
+            if n <= 1:
+                raise ValueError("training BatchNorm needs more than one value per channel")
+            mean = stats.mean(dim=0)                        # [C]
+            var = stats.var(dim=0, unbiased=False)          # 前向除以 n
+            # 更新统计量不建计算图，但上面的 mean/var 仍用于输入反传。
+            with torch.no_grad():
+                self.running_mean.lerp_(mean.to(self.running_mean.dtype), self.momentum)
+                unbiased_var = var * n / (n - 1)
+                self.running_var.lerp_(unbiased_var.to(self.running_var.dtype), self.momentum)
         else:
             mean = self.running_mean
             var = self.running_var
 
-        x_hat = (x - mean) / torch.sqrt(var + self.eps)
-        return x_hat * self.gamma + self.beta
+        x_hat = (stats - mean) / torch.sqrt(var + self.eps)
+        return (x_hat * self.gamma + self.beta).to(x.dtype)
 ```
 
 ### 哪些量可学习，哪些不可学习？
@@ -151,12 +163,12 @@ class BatchNorm1d(nn.Module):
 |---|---|---|
 | $\gamma_j$ | 是 | 恢复或抑制第 $j$ 个通道的幅值 |
 | $\beta_j$ | 是 | 调整第 $j$ 个通道的基线 |
-| batch mean / variance | 否 | 训练当前 batch 的即时统计量 |
+| batch mean / variance | 不是参数，但参与对输入的链式求导 | 训练当前 batch 的即时统计量 |
 | running mean / variance | 否，属于 buffer | 指数滑动更新，推理时替代 batch 统计量 |
 
 为什么标准化后还要 $\gamma、\beta$？若强制每层输出永远为零均值、单位方差，会限制后续层需要的表示尺度；例如 $\gamma_j=0$ 可以关闭某个通道，较大的 $\gamma_j$ 可以放大有用特征。仿射参数让 BN 获得稳定统计的同时不丢掉逐通道重参数化能力。
 
-上面的实现用于讲清机制，和 PyTorch 仍有一个细节差异：PyTorch 训练前向归一化使用有偏方差，而写入 `running_var` 时使用无偏估计；生产代码应直接使用 `nn.BatchNorm1d`。
+上面的实现与 PyTorch 默认 BN 的关键统计口径一致：前向除以 n，写入 `running_var` 的估计除以 n−1。它只覆盖二维输入、固定 momentum 和追踪 running stats；不实现官方的三维输入、`momentum=None` 累计平均或 `track_running_stats=False`。生产代码使用 `nn.BatchNorm1d`。
 
 ### 三种 Norm 对比
 
@@ -199,9 +211,9 @@ def pre_norm_block(x):
 
 | 维度 | Post-Norm | Pre-Norm |
 |---|---|---|
-| 训练稳定性 | 差（深层易梯度消失） | 好 |
-| 收敛速度 | 慢（需要 warmup） | 快 |
-| 最终精度 | 略高（如果训得动） | 略低 |
+| 梯度路径 | 残差相加后还经过 Norm | 有直接的恒等支路 |
+| 训练条件 | 通常更敏感于初始化和 warmup | 通常更易训练深层网络 |
+| 最终精度与速度 | 依赖深度、优化与算子实现 | 不能无条件排出高低 |
 | 现代 LLM | 少见 | 主流，但并非唯一选择 |
 
 ### 易错点

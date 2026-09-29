@@ -37,6 +37,8 @@ class LoRALinear(nn.Module):
                  r: int = 8, alpha: float = 16, dropout: float = 0.0,
                  base_linear: nn.Linear = None):
         super().__init__()
+        if r <= 0:
+            raise ValueError("r must be positive")
         # 原 Linear（冻结）
         if base_linear is not None:
             self.base = base_linear
@@ -48,8 +50,9 @@ class LoRALinear(nn.Module):
         # LoRA 旁路
         self.r = r
         self.scaling = alpha / r
-        self.lora_A = nn.Parameter(torch.zeros(r, in_features))
-        self.lora_B = nn.Parameter(torch.zeros(out_features, r))
+        # 本例限定普通浮点 nn.Linear，不直接包装量化权重。
+        self.lora_A = nn.Parameter(self.base.weight.new_zeros(r, in_features))
+        self.lora_B = nn.Parameter(self.base.weight.new_zeros(out_features, r))
         self.lora_dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         # 常见初始化：A 用 Kaiming uniform，B 用 0
@@ -74,6 +77,8 @@ class LoRALinear(nn.Module):
 
 LoRA 假设低秩的是任务更新 $\Delta W$，不是基座 $W$。$r$ 控制更新子空间容量：太小欠拟合，太大增加显存与过拟合风险；应结合覆盖层数、任务跨度和验证集选择，而不是只背 8/16/64。
 
+四种初始化与首步有效权重更新的推导见 [LoRA 原理](../docs/03-fine-tuning.md#q01--lora-原理)。测试时要同时检查：初始输出是否等于基座、A/B 的梯度范数、更新一步后分支是否非零。“初始化时 A 梯度为零”不等于 A 在整个训练过程中都不学习。
+
 ---
 
 ## Q02 · 把 LoRA 注入已有模型
@@ -90,15 +95,17 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
     """
     把 model 中名字匹配 target_modules 的 Linear 替换成 LoRALinear。
     """
-    for name, module in model.named_modules():
-        # 只处理叶子模块的 Linear
-        if not isinstance(module, nn.Linear):
-            continue
-        # 名字最后一段在 target_modules 里
+    if any(isinstance(m, LoRALinear) for m in model.modules()):
+        raise ValueError("already contains LoRA; do not inject twice")
+    targets = [(name, m) for name, m in model.named_modules()
+               if name and isinstance(m, nn.Linear)
+               and name.split('.')[-1] in target_modules]
+    if not targets:
+        raise ValueError("no matching Linear modules")
+    # 本例策略：整个基座冻结，仅新建的 A/B 可训练。
+    model.requires_grad_(False)
+    for name, module in targets:
         last_name = name.split('.')[-1]
-        if last_name not in target_modules:
-            continue
-
         # 构造 LoRALinear，复用原 Linear 的权重
         new_module = LoRALinear(
             module.in_features,
@@ -106,6 +113,7 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
             r=r, alpha=alpha,
             base_linear=module    # 直接传入原 Linear，权重不变
         )
+        new_module.train(module.training)
 
         # 找到父模块并替换
         parent_name = '.'.join(name.split('.')[:-1])
@@ -127,6 +135,8 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
 - **target_modules 选哪些**：`q_proj, v_proj` 是常见轻量起点；覆盖 `k_proj, o_proj` 和 FFN 会提高容量，也增加可训练参数。没有跨任务固定最优集合
 - **norm / embedding 要单独决策**：LoRA 主要包装矩阵权重；norm 或 embedding 可冻结，也可通过 `modules_to_save` 等方式直接训练，取决于词表变化和任务跨度
 
+这里默认全部冻结，不会因为“没有替换某个层”就意外训练它。注入后用 `[(n, p.shape) for n, p in model.named_parameters() if p.requires_grad]` 核验，再创建优化器；旧优化器不会自动纳入新参数。示例不覆盖共享模块别名、tied weight 和量化层，生产注入应使用经过验证的 PEFT 实现。
+
 ---
 
 ## Q03 · Merge LoRA 权重回原模型
@@ -138,24 +148,33 @@ def inject_lora(model: nn.Module, target_modules=('q_proj', 'v_proj'),
 ### 代码
 
 ```python
+@torch.no_grad()
 def merge_lora(model: nn.Module):
-    """把 LoRALinear 合并回 nn.Linear"""
+    """合并普通浮点 LoRA 子模块；调用者先 model.eval()。"""
+    if model.training or any(m.training for m in model.modules() if isinstance(m, LoRALinear)):
+        raise ValueError("merge requires eval mode (dropout disabled)")
+    if isinstance(model, LoRALinear):
+        raise ValueError("pass a container model with LoRA submodules")
     for name, module in list(model.named_modules()):
         if not isinstance(module, LoRALinear):
             continue
 
         # 计算合并后的权重：W + (α/r) * B @ A
-        merged_weight = module.base.weight.data + module.scaling * (module.lora_B @ module.lora_A)
+        merged_weight = module.base.weight + module.scaling * (module.lora_B @ module.lora_A)
 
         # 创建新 Linear 替换
         new_linear = nn.Linear(
             module.base.in_features,
             module.base.out_features,
-            bias=(module.base.bias is not None)
+            bias=(module.base.bias is not None),
+            device=module.base.weight.device,
+            dtype=module.base.weight.dtype,
         )
-        new_linear.weight.data = merged_weight
+        new_linear.weight.copy_(merged_weight)
         if module.base.bias is not None:
-            new_linear.bias.data = module.base.bias.data.clone()
+            new_linear.bias.copy_(module.base.bias)
+        new_linear.requires_grad_(False)
+        new_linear.eval()
 
         # 替换
         parent_name = '.'.join(name.split('.')[:-1])

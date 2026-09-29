@@ -25,15 +25,29 @@ LLM 推理时的采样策略——决定生成质量、多样性、稳定性。
 import torch
 
 @torch.no_grad()
-def greedy_decode(model, input_ids, max_new_tokens=50, eos_id=None):
+def greedy_decode(model, input_ids, max_new_tokens=50, eos_id=None, pad_id=None):
+    """model 返回 logits Tensor；等长无 padding prompt，调用前 model.eval()。"""
+    if max_new_tokens < 0:
+        raise ValueError("max_new_tokens must be nonnegative")
+    if max_new_tokens == 0:
+        return input_ids
+    if input_ids.size(1) == 0:
+        raise ValueError("prompt must be nonempty")
+    finished = torch.zeros(input_ids.size(0), dtype=torch.bool, device=input_ids.device)
+    fill_id = eos_id if pad_id is None else pad_id
     for _ in range(max_new_tokens):
         logits = model(input_ids)[:, -1, :]                  # [B, V]
         next_id = logits.argmax(dim=-1, keepdim=True)        # [B, 1]
+        if eos_id is not None:
+            next_id = torch.where(finished[:, None], fill_id, next_id)
+            finished |= next_id.squeeze(-1).eq(eos_id)
         input_ids = torch.cat([input_ids, next_id], dim=-1)
-        if eos_id is not None and (next_id == eos_id).all():
+        if eos_id is not None and finished.all():
             break
     return input_ids
 ```
+
+`finished` 必须跨步保存：样本 A 在第 1 步结束、B 在第 3 步结束时，不能只检查“当前步是否全部 EOS”。已结束行填 pad（未指定则填 EOS），返回值按首个生成 EOS 截断解释。本接口不自动处理 Hugging Face 输出对象；使用 HF 模型时应取 `.logits`，有 padding 的输入还需要 attention mask 与最后有效位置。
 
 ### 易错点
 

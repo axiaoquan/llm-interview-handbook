@@ -42,23 +42,32 @@ def get_pair_stats(vocab: dict) -> Counter:
 
 def merge_pair(pair: Tuple[str, str], vocab: dict) -> dict:
     """把所有 word 中出现的 pair 合并成一个新符号"""
-    new_vocab = {}
-    bigram = ' '.join(pair)
-    replacement = ''.join(pair)
+    new_vocab = Counter()
     for word, freq in vocab.items():
-        new_word = word.replace(bigram, replacement)
-        new_vocab[new_word] = freq
-    return new_vocab
+        symbols = word.split()
+        merged = []
+        i = 0
+        while i < len(symbols):
+            if i + 1 < len(symbols) and (symbols[i], symbols[i + 1]) == pair:
+                merged.append(symbols[i] + symbols[i + 1])
+                i += 2
+            else:
+                merged.append(symbols[i])
+                i += 1
+        new_vocab[' '.join(merged)] += freq
+    return dict(new_vocab)
 
 
 def train_bpe(corpus: List[str], num_merges: int = 1000):
     """
-    corpus: 词列表（建议先按空格切并加 </w> 词尾标记）
+    corpus: 不含空白或保留标记的原始词列表；函数内部添加 </w>。
     num_merges: 合并多少次
     """
     # 1. 初始化：每个词拆成字符序列
     vocab = Counter()
     for word in corpus:
+        if not word or any(ch.isspace() for ch in word) or '</w>' in word:
+            raise ValueError("expected nonempty words without whitespace or reserved </w>")
         # "low" → "l o w </w>"
         chars = ' '.join(list(word)) + ' </w>'
         vocab[chars] += 1
@@ -90,6 +99,8 @@ for pair in merges:
 - **训练时间**：朴素实现 O(num_merges × n_words × n_pairs)，工业级要用 priority queue 优化（HuggingFace tokenizers 是 Rust 写的）
 
 Byte-level 的“无 OOV”来自任何文本最终都能退回 256 种 byte，不代表切分高效：训练语料很少见的文字可能被拆成多个 token，序列更长。字符级起点对常见 Unicode 更紧凑，但要额外设计 unknown/byte fallback。两者是在词表覆盖与序列长度之间取舍。
+
+合并必须匹配完整 token：规则 `('a','b')` 不应改变 `['aa','b','</w>']`，字符串 `replace('a b','ab')` 却会误合并。重叠的 `a a a` 按从左到右、不重叠地合并为 `aa a`；若不同词表示合并后成为同键，频次必须累加。
 
 ---
 
@@ -137,12 +148,12 @@ result = encode("lowest newest", merges)
 # 可能输出：['low', 'est</w>', 'new', 'est</w>']
 ```
 
-### 高效实现：贪心 + priority queue
+### 按 merge rank 选择：全扫描教学版
 
-朴素实现是 O(n × num_merges)，工业级用 priority queue：
+上面按规则遍历约为 O(n × num_merges)。下面每次扫描当前相邻 pair、合并 rank 最小的一对，最坏约 O(n²)，**并没有实现 priority queue，也不保证更快**。真正的堆版本还需邻接链表、局部更新与失效项处理。
 
 ```python
-def encode_word_fast(word, merge_ranks: dict):
+def encode_word_by_rank(word, merge_ranks: dict):
     """
     merge_ranks: {('l','o'): 0, ('lo','w'): 1, ...}  ← 每条规则始终是二元 pair
     """
@@ -184,19 +195,23 @@ def build_vocab(corpus_file: str, num_merges: int = 30000):
     word_list = list(word_counter.elements())
     merges, _ = train_bpe(word_list, num_merges)
 
-    # 3. 构建 token → id 映射
-    all_tokens = set()
+    # 3. 保留基础字符、词尾标记及每次 merge 的产物。
+    # 只收集最终编码会漏掉独立编码新词时仍需要的基础/中间 token。
+    all_tokens = {'</w>'}
     for word in word_counter:
-        for tok in encode_word(word, merges):
-            all_tokens.add(tok)
+        all_tokens.update(word)
+    all_tokens.update(a + b for a, b in merges)
 
-    token_to_id = {tok: i for i, tok in enumerate(sorted(all_tokens))}
-    # 加特殊 token
-    for special in ['<pad>', '<unk>', '<bos>', '<eos>']:
-        token_to_id[special] = len(token_to_id)
+    specials = ['<pad>', '<unk>', '<bos>', '<eos>']
+    if all_tokens.intersection(specials):
+        raise ValueError("corpus token collides with a reserved special token")
+    tokens = specials + sorted(all_tokens)
+    token_to_id = {tok: i for i, tok in enumerate(tokens)}
 
     return merges, token_to_id
 ```
+
+训练语料只有 `ab` 时，即使最终被合成 `ab</w>`，词表也必须包含 `a`、`b`、`</w>` 和中间合并符号，否则单独编码 `a` 就会缺 ID。本例是字符级、按词分割的教学 BPE：`text.split()` 会丢弃原始空白，不承诺逐字节可逆；未见字符映射到 `<unk>` 会丢信息，完整可逆方案需另做 byte-level 编码及 decode。
 
 ### 主流模型 tokenizer 对比
 

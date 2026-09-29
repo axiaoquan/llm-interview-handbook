@@ -101,7 +101,7 @@ $$
 ### 面试常见追问
 
 - **Q：KL 散度对称吗？**
-  A：**不对称**。$D_{KL}(P\VertQ) \neq D_{KL}(Q\VertP)$。所以严格说不是"距离"。对称化版本叫 JS 散度。
+  A：**不对称**。$D_{KL}(P\Vert Q) \neq D_{KL}(Q\Vert P)$。所以严格说不是“距离”。JS 是一种对称构造：令 $M=(P+Q)/2$，取 $\frac12D_{KL}(P\Vert M)+\frac12D_{KL}(Q\Vert M)$；它不是简单将两个方向的 KL 相加。
 
 - **Q：为什么 LLM next-token 预测用交叉熵？**
   A：等价于最小化预测分布和真实 one-hot 分布的 KL 散度，让模型分布尽量靠近数据分布。

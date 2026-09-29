@@ -31,7 +31,7 @@
 ```python
 def backtrack(参数):
     if 终止条件:
-        ans.append(path[:])     # 必须深拷贝！
+        ans.append(path[:])     # 复制列表；本题元素是不可变值，浅拷贝足够
         return
     for 选择 in 当前层选择列表:
         path.append(选择)        # 处理
@@ -41,7 +41,7 @@ def backtrack(参数):
 
 ### 三个关键
 
-1. **path[:]** 深拷贝，否则后续修改会污染答案
+1. **path[:] 是浅拷贝**：保存当前列表，避免后续 append/pop 污染答案；若元素本身也是会被修改的嵌套对象，才需要进一步复制
 2. **for 起点 startIndex** 控制不重复
 3. **used[]** 数组在排列中用来去重
 
@@ -107,9 +107,10 @@ def combinationSum(candidates, target):
 
 > [LeetCode 40](https://leetcode.cn/problems/combination-sum-ii/)
 
-**树层去重**：同一层相邻相同元素只能用第一个。
+**树层去重**：先排序 candidates，使相同元素相邻；同一层相邻相同元素只能用第一个。
 
 ```python
+# 片段：放在枚举 candidates 的 for 循环内部。
 if i > start and candidates[i] == candidates[i-1]:
     continue
 ```
@@ -197,9 +198,10 @@ class Solution:
 
 ### 排列 II（含重复）
 
-`used[i-1] == False` 表示同一层先前选过的相同元素已回溯 → **跳过**。
+先排序 nums。`used[i-1] == False` 表示同一层先前选过的相同元素已回溯 → **跳过**。
 
 ```python
+# 片段：放在枚举 nums 的 for 循环内部。
 if i > 0 and nums[i] == nums[i-1] and not used[i-1]:
     continue
 ```
