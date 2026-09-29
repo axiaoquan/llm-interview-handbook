@@ -11,6 +11,8 @@
 - [Q05 · 混合精度训练（FP16 / BF16）](#q05--混合精度训练)
 - [Q06 · 分布式训练（DP / DDP / FSDP / DeepSpeed ZeRO）](#q06--分布式训练)
 - [Q07 · 并行策略（TP / PP / SP / EP）](#q07--并行策略)
+- [Q08 · 预训练数据与计算预算](#q08--预训练数据与计算预算)
+- [Q09 · 有效 token、梯度累积与精确续训](#q09--有效-token梯度累积与精确续训)
 
 ---
 
@@ -117,6 +119,22 @@ v_hat = v / (1 - β2^t)
 θ = θ - lr * m_hat / (sqrt(v_hat) + ε)             # Adam 更新
 ```
 
+### 为什么要做偏差修正？
+
+从零初始化动量，在梯度均值固定为 $\mu$ 的简化假设下，展开指数滑动平均：
+
+```math
+m_t=(1-\beta_1)\sum_{k=1}^{t}\beta_1^{t-k}g_k,
+\qquad
+\mathbb{E}[m_t]=(1-\beta_1^t)\mu
+```
+
+前几步累计权重不足 1，所以除以 $1-\beta_1^t$；二阶矩对 $\mathbb{E}[g^2]$ 做同样修正。它修正的是零初始化造成的缩小，不保证非平稳训练中的统计量准确，也不使最终的比值更新成为“无偏梯度”。当 $\beta_1=0.9$、首步梯度为 2 时，$m_1=0.2$，修正后为 2。
+
+分母中的 $\varepsilon$ 避免二阶矩接近零时除零，并限制极小梯度下的更新幅度；$\sqrt{\hat v}+\varepsilon$ 与 $\sqrt{\hat v+\varepsilon}$ 不是同一个优化器。bias、Norm 的 scale/bias 是否排除 weight decay 是参数分组策略，常见做法是排除，但不是 AdamW 定义所强制要求。
+
+**一个区分 Adam+L2 与 AdamW 的反例**：令两个参数都为 1、当前数据梯度为 0，历史二阶矩为 $[1,100]$。暂忽略动量混合，L2 项经过预条件后，两个坐标的收缩贡献比例约为 $1:0.1$；AdamW 的独立收缩对两个坐标相同。这里是在隔离衰减机制，不是完整 Adam 一步更新的数值模拟。参考 [Adam](https://arxiv.org/abs/1412.6980) 与 [AdamW](https://arxiv.org/abs/1711.05101)。
+
 ### 优化器显存开销
 
 每个参数（FP32）需要存：
@@ -134,7 +152,7 @@ v_hat = v / (1 - β2^t)
   A：β1=0.9（一阶动量），β2=0.999（二阶动量），但 LLM 训练**β2 常设为 0.95**（更适应大梯度变化）。
 
 - **Q：Lion 比 AdamW 好在哪？**
-  A：只需要存一阶动量 → 显存省一半。某些场景效果更好，但调参比 AdamW 敏感。
+  A：若状态都用 FP32，一份动量相对 Adam 的两份矩状态，可使优化器状态从每参数 8 bytes 降到 4 bytes，不是整个训练显存减半。在上面的全 FP32 口径下，模型状态总量是 16 → 12 bytes/param，激活与临时 buffer 还未计入。效果与调参需独立比较。
 
 ---
 
@@ -244,6 +262,12 @@ FP16 动态范围小，梯度容易**下溢成 0**。
 
 BF16 范围接近 FP32，**不需要这个技巧**。
 
+### AMP、累积与裁剪的顺序为什么不能交换？
+
+一个优化器更新窗口内，应先完成所有 microbatch 的 backward；使用 loss scaling 时保持同一个 scale。然后依次做 **unscale → 全局梯度范数裁剪 → optimizer step → 更新 scale**，最后清理梯度。若先裁剪放大后的梯度，阈值实际也被错误缩放；若在累积中途 unscale 或更改 scale，后续梯度相加便不在同一尺度。
+
+Inf/NaN 导致 optimizer step 被跳过时，按更新步数驱动的 scheduler 也应避免无条件前进。BF16 通常无需 scaler，但并不免疫溢出、错误 mask 或不稳定的归约。分片训练中的“全局范数”还需要正确聚合各分片，不能各卡独立裁剪后声称等价。库行为参见 [PyTorch 2.8 AMP 示例](https://docs.pytorch.org/docs/2.8/notes/amp_examples.html)。
+
 ### 追问
 
 - **Q：训练用混合精度，参数量怎么算显存？**
@@ -271,6 +295,20 @@ BF16 范围接近 FP32，**不需要这个技巧**。
 | **ZeRO-3** | + 参数 | 三类模型状态都约按 $1/N$ 分片 |
 
 不能把总显存简单写成固定“4×/8×”：activation、临时 all-gather buffer 和碎片不随 ZeRO stage 等比例下降。ZeRO-3 与 FULL_SHARD FSDP 思路相近，前向/反向需要按层 all-gather 参数并 reduce-scatter 梯度，以通信换模型状态显存。
+
+### 分片参数的一次生命周期
+
+以计算后重新分片的 full-shard 策略为例，分片单位通常是一个参数组或模块，不必恰好一层：
+
+| 时点 | 每张卡持有什么 | 通信与释放 |
+|---|---|---|
+| 空闲 / 更新后 | 自己的参数、梯度及优化器状态分片 | 常驻状态较小 |
+| 某模块前向前 | 聚合该模块完整参数 | all-gather；前向后可释放完整参数 |
+| 该模块反向前 | 再次聚合完整参数，读取保存的激活 | all-gather；计算输入梯度及参数梯度 |
+| 该模块反向后 | 规约后的梯度分片 | reduce-scatter；释放完整参数及用完的激活 |
+| optimizer step | 本卡参数分片及对应状态 | 每卡只更新自己负责的分片 |
+
+prefetch 会提前持有下一组完整参数，通信与计算重叠能提速，却提高峰值显存。改变 reshard 策略也会改变反向是否再次 all-gather。不能用“常驻参数除以卡数”预测整轮峰值。参见 [PyTorch FSDP2 教程](https://docs.pytorch.org/tutorials/intermediate/FSDP_tutorial.html)。
 
 ### ZeRO-Offload / ZeRO-Infinity
 
@@ -307,7 +345,9 @@ BF16 范围接近 FP32，**不需要这个技巧**。
 ### PP 的 bubble 问题
 
 每个阶段 GPU 等待上游 → 利用率低。
-解决：**1F1B / interleaved 1F1B**（micro-batch 流水线）减少 bubble。
+在平衡 stage、忽略通信、每个 microbatch 前反向代价固定的简化模型下，非交错流水线的 bubble 占比约为 $(p-1)/(m+p-1)$，其中 $p$ 是 stage 数，$m$ 是 microbatch 数。4 个 stage、8 个 microbatch 时约为 $3/11=27.3\%$；增加到 32 个时约为 $3/35=8.6\%$。
+
+更多 microbatch 可以摊薄填充/排空开销，但太小的 microbatch 会损害算子效率。**1F1B** 相比先做完所有前向再反向，主要降低同时保存的激活数量，并不自动消除上述气泡；interleaved 调度可进一步改变气泡与通信开销。实际结果还取决于 stage 负载不均、通信和调度实现。参见 [Megatron-LM 大规模训练研究](https://arxiv.org/abs/2104.04473)。
 
 ### 追问
 
@@ -316,6 +356,72 @@ BF16 范围接近 FP32，**不需要这个技巧**。
 
 - **Q：长上下文为什么要 SP？**
   A：activation 随序列长度增长，SP 可把 LayerNorm、dropout、残差等逐 token 运算沿序列维分片。但标准 attention 仍需要跨分片获取 K/V 或采用 ring/context parallel 通信；“每张卡只算一段”不等于没有跨卡依赖。
+
+---
+
+## Q08 · 预训练数据与计算预算
+
+### 数据流水线为什么不只是“收集更多文本”？
+
+原始语料需要经历来源与许可记录、解析、质量过滤、去重、评测去污染、数据配比和 tokenization。顺序会影响结果：例如把同一文档的不同版本先随机拆到 train/validation，再各自去重，仍会造成跨集合泄漏。许可与隐私要求应单独检查，不能把“网上可下载”当作可训练的充分条件。
+
+| 环节 | 解决的问题 | 容易付出的代价 |
+|---|---|---|
+| 规则 / 分类器质量过滤 | 乱码、模板噪声、低信息密度 | 过强过滤会删除方言、小语种和非主流文体 |
+| 精确去重 | 完全相同的文档反复出现 | 不能识别改写、局部复制或格式变化 |
+| 近重复检测 | 用规范化、n-gram/MinHash 等找高重合文本 | 阈值过低会误删共享事实但有独立价值的内容 |
+| 文档 / 来源分组切分 | 防止同源近重复跨训练和评测 | 分组不合理也会造成分布差异 |
+| 评测去污染 | 检查题干、答案、解析和改写的泄漏 | 检测不完全，未命中不等于无污染 |
+
+去重减少重复暴露与记忆风险，但不是无条件越强越好；应同时看有效 token 数、来源覆盖及分桶验证 loss。相关实证见 [Deduplicating Training Data Makes Language Models Better](https://arxiv.org/abs/2107.06499)。
+
+### 数据配比为什么不能只按原始体量？
+
+设领域 $k$ 有 $n_k$ 个 token，一种采样分布是 $p_k=n_k^\alpha/\sum_j n_j^\alpha$。$\alpha=1$ 按体量采样；$\alpha=0$ 在非空领域间均匀；介于两者之间会提高小领域占比。它是配比策略，不是普遍最优公式。
+
+若训练总预算为 $D$ 个 token，领域 $k$ 的期望暴露次数约为 $Dp_k/n_k$。小领域被反复采样可能改善覆盖，也可能更早过拟合；要报告重复暴露率，不能把重复的 token 都算作新增知识。配比也可分阶段调整，但每次变化都应看分领域验证集及通用能力回归。
+
+### Scaling law 如何帮助预算决策？
+
+常见经验拟合用模型参数量 $N$、训练 token 数 $D$ 表示验证损失：
+
+```math
+L(N,D)\approx E+\frac{a}{N^\alpha}+\frac{b}{D^\beta},
+\qquad C\approx 6ND
+```
+
+这里指数与系数需用实验拟合；$6ND$ 是稠密模型训练主干的粗略 FLOPs 口径，忽略长上下文 attention、重计算等额外项。在固定预算下，只增大模型会减少可训练 token，使模型可能训练不足；只增数据也会遇到容量限制。
+
+[Chinchilla 研究](https://arxiv.org/abs/2203.15556) 给出了特定实验范围内的计算最优配比证据，不意味着“每参数固定配 20 个 token”是所有模型的定律。若部署期会生成海量 token，训练更小但更充分的模型可能降低总成本；训练计算最优与全生命周期成本最优不是同一个问题。
+
+---
+
+## Q09 · 有效 token、梯度累积与精确续训
+
+### 为什么 microbatch 的平均 loss 不能直接再平均？
+
+令 microbatch $j$ 的有效监督 token 数为 $n_j$，loss 总和为 $S_j$。若目标是每个有效 token 等权，正确目标为：
+
+```math
+L=\frac{\sum_j S_j}{\sum_j n_j}
+=\sum_j\frac{n_j}{\sum_k n_k}\,\bar L_j
+```
+
+例：两个 microbatch 分别有 2 和 8 个有效 token，平均 loss 为 3 和 1。简单平均得到 2；按 token 加权为 $(2\times3+8\times1)/10=1.4$。梯度也有相同的权重差异。除以固定 accumulation steps 仅在各 microbatch 分母相同、或刻意追求 microbatch 等权时成立。
+
+可以先获知整个累积窗口的有效 token 总数，再归一化每个 microbatch 的 loss sum；也可累积 sum 梯度后统一缩放。最后不足完整窗口的残余 batch 同样按真实分母处理。全 ignore 的窗口应跳过并记录，不能对零分母求平均。
+
+### DDP 为什么还要考虑 world size？
+
+默认 DDP 对 $W$ 张卡的梯度取平均。若全局有效 token 总数为 $N_{\mathrm{valid}}$，每卡累积自己的 loss sum 后，需令最终梯度等于 $\sum_r\nabla S_r/N_{\mathrm{valid}}$。因此可将每卡 loss sum 乘 $W/N_{\mathrm{valid}}$，补偿 DDP 的 $1/W$；不能再额外除一次 accumulation steps。
+
+这是默认平均规约、无自定义通信 hook 的推导；如果框架已经处理 token 归一化，不能重复缩放。各 rank 应协调空 batch 与更新步数，否则可能通信挂起。中间 microbatch 可用 DDP 的 no_sync 减少通信，但上下文须覆盖前向和反向；FSDP 的不同累积策略可能额外保留完整梯度，需单独测显存。参见 [PyTorch DDP 文档](https://docs.pytorch.org/docs/2.8/generated/torch.nn.parallel.DistributedDataParallel.html)。
+
+### “恢复权重”与“精确续训”有什么区别？
+
+要尽可能延续同一训练轨迹，除参数外，还需恢复 optimizer、scheduler、AMP scaler、各 rank 的随机数状态、sampler/dataloader 位置、累积步数和必要的未更新梯度。优先在完整 optimizer step 边界保存，可以简化恢复。
+
+还应记录 tokenizer/chat template、数据版本与配比、并行配置、软件版本。即使这些都恢复，换硬件、world size 或非确定性 kernel 仍可能改变数值轨迹；应区分“可继续训练”“统计可复现”和“逐位一致”。
 
 ---
 

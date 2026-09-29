@@ -23,10 +23,12 @@
 
 ## 验证要求
 
-- `python scripts/check_docs.py`：围栏、Python 编译、数学括号/已知危险写法、本地文件链接的静态检查；不能替代 LaTeX 引擎或 GitHub 渲染。
+- 先执行 `python -m pip install -r tests/requirements-docs.txt` 安装固定版本文档解析器。
+- `python scripts/check_docs.py`：CommonMark 围栏、Python 编译、数学定界符/括号/已知危险写法、本地文件链接的静态检查；不能替代 LaTeX 引擎或 GitHub 渲染。
 - `python -m unittest discover -s tests -v`：需要 PyTorch，当前测试范围见 [tests/README.md](tests/README.md)。
 - 公式改动发布前须在目标 GitHub 页面复核，尤其是分式、下标、绝对值和多行式。
 - 数学推导写清假设；库行为引用固定版本官方文档，模型结论对应具体论文版本。不能把数值无偏、梯度无偏、数学非负和浮点稳定混为一谈。
+- main push 和 PR 自动运行文档、KaTeX 与 CPU 回归检查。工作流通过不等于全部示例已获得运行认证，仍需阅读测试覆盖边界。
 
 ## 风格
 

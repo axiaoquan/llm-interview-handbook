@@ -1,0 +1,47 @@
+name: Validate handbook
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install pinned documentation checkers
+        run: |
+          python -m pip install -r tests/requirements-docs.txt
+          npm install --prefix "$RUNNER_TEMP/handbook-math" --no-audit --no-fund katex@0.16.22
+      - name: Check extraction regressions and Markdown
+        run: |
+          python -m unittest discover -s tests -p test_doc_checks.py -v
+          python scripts/check_docs.py
+      - name: Parse all extracted formulas
+        run: NODE_PATH="$RUNNER_TEMP/handbook-math/node_modules" node scripts/check_math.cjs
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned CPU test dependencies
+        run: |
+          python -m pip install -r tests/requirements-docs.txt
+          python -m pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
+      - name: Run regression tests
+        run: python -m unittest discover -s tests -v

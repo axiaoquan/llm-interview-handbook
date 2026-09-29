@@ -29,11 +29,11 @@ $$
 \text{KV Cache} = 2 \times B \times L \times H \times D \times N \times \text{sizeof(dtype)}
 $$
 
-其中：B = batch、L = seq length、H = n_heads、D = d_head、N = n_layers
+其中：B = batch、L = seq length、H = **KV 头数**、D = d_head、N = n_layers。MHA 的 Q/KV 头数相同，GQA/MQA 则不能把 query 头数代入。
 
 - 系数 2：K 和 V 各一份
 - 例：LLaMA-7B（32 层、32 头、d=128），batch=1，seq=2048，FP16
-  $\approx 2 \times 1 \times 2048 \times 32 \times 128 \times 32 \times 2 = 1\text{ GB}$
+  $2 \times 1 \times 2048 \times 32 \times 128 \times 32 \times 2 = 1\text{ GiB}$，约 1.074 GB；此处未计分页及元数据开销。
 
 → batch / 上下文一拉长，KV Cache 直接就是几十 GB，**经常成为显存瓶颈**。
 
@@ -43,7 +43,7 @@ $$
 |---|---|---|
 | **MQA** | 所有 Q 头共享 1 个 KV 头 | $1/h$ |
 | **GQA** | 每组 Q 头共享 1 个 KV 头 | $g/h$ |
-| **MLA** | 压缩到低维潜在空间 | ~6.7% |
+| **MLA** | 缓存潜在向量及必要的位置 key | 取决于潜在维度、位置维度和原 KV 形状，不是固定比例 |
 | **量化** | KV Cache 用 INT8/INT4 | 50% / 75% |
 | **窗口注意力** | 只保留最近的 KV | window/total |
 
@@ -73,11 +73,32 @@ $$
 ### 效果
 
 - **中间显存**：不再物化完整 $n\times n$ score/probability 矩阵，额外存储从 $O(n^2)$ 降到近似 $O(n)$
-- **速度**：2-4× 加速（不是因为减少 FLOPs，而是减少 HBM IO）
+- **速度**：通过减少 HBM IO 等开销提速；收益取决于形状、硬件及比较基线，不给通用固定倍数
 
 ### 关键洞察
 
 GPU attention 在许多形状下受**显存带宽（IO）**限制。Flash Attention 的本质是 IO-aware：分块把 Q/K/V 搬进片上 SRAM，利用 online softmax 维护每行的运行最大值和归一化和，在不保存完整注意力矩阵的情况下得到与标准 attention 等价的结果。它没有把 dense attention 的理论 FLOPs 从 $O(n^2)$ 变成线性；速度收益也随序列长度、head dimension、mask 和硬件而变化。
+
+### Online softmax 为什么能合并不同块？
+
+固定一个 query，令已处理分数的最大值为 $m$，指数和为 $\ell$，未归一化的加权 value 和为向量 $u$。新块分数为 $s_j$、value 为 $v_j$，先更新最大值 $m'$，再统一指数的参考点：
+
+```math
+m'=\max\!\left(m,\max_j s_j\right)
+```
+
+```math
+\ell'=e^{m-m'}\ell+\sum_j e^{s_j-m'},
+\qquad
+u'=e^{m-m'}u+\sum_j e^{s_j-m'}v_j,
+\qquad o'=\frac{u'}{\ell'}
+```
+
+旧指数原本以 $m$ 为基准，新块可能带来更大最大值；乘 $e^{m-m'}$ 后就与新块同尺度。分子、分母同时缩放，归一化结果不变。初始化可设 $m=-\infty,\ell=0,u=0$，但首块或整行全 masked 时须显式处理，避免 $-\infty-(-\infty)$ 与零分母。
+
+手算两个分数 $[0,\log2]$，对应标量 value $[1,3]$。第一块后 $m=0,\ell=1,u=1$；第二块令 $m'=\log2$，旧项乘 $1/2$，得到 $\ell'=1.5,u'=3.5$，输出 $7/3$，与权重 $[1/3,2/3]$ 的直接计算一致。
+
+反向可利用保存的归一化统计量和输出，分块重算概率而不保存整张矩阵，以额外计算换 IO 和存储。这里的“exact”指未改变 dense attention 的数学算子，不保证不同精度、求和顺序下逐位相同；训练 dropout 的反向还需复现相应随机掩码。来源：[FlashAttention](https://arxiv.org/abs/2205.14135)。
 
 ### 追问
 
@@ -112,7 +133,7 @@ GPU attention 在许多形状下受**显存带宽（IO）**限制。Flash Attent
 ### 追问
 
 - **Q：PagedAttention 有性能损失吗？**
-  A：访存有少量额外开销（查映射表），但显存利用率提升带来的更大 batch 远远抵消。
+  A：映射查找和非连续访存有开销。在受 KV 容量限制的并发场景中，减少浪费可能允许更大 batch 并提高吞吐；小 batch、短上下文或不同 kernel 下未必净收益。应同时比较显存占用、吞吐和延迟。
 
 ---
 
@@ -156,6 +177,27 @@ GPU attention 在许多形状下受**显存带宽（IO）**限制。Flash Attent
 
 上述接受—拒绝校正保证采样分布与只用 target model 相同，因此是分布意义上的无损加速。若实现只是比较 argmax 是否一致，或直接保留“看起来猜对”的 token，则不具备这个保证。
 
+### 为什么拒绝后的修正分布恰好补齐概率？
+
+固定相同前缀，记接受率为 $A=\sum_x\min(p(x),q(x))$。草稿采到 $x$ 并被接受的概率质量是 $q(x)\min(1,p(x)/q(x))=\min(p(x),q(x))$；$q(x)=0$ 时该项按零处理。
+
+当 $A<1$ 时，拒绝概率为 $1-A=\sum_x[p(x)-q(x)]_+$，其中 $[z]_+=\max(z,0)$。因此从残差分布采样所增加的质量为：
+
+```math
+(1-A)\frac{[p(x)-q(x)]_+}{1-A}
+=[p(x)-q(x)]_+
+```
+
+两部分之和 $\min(p(x),q(x))+[p(x)-q(x)]_+=p(x)$。若 $A=1$ 则不会进入拒绝分支，不能再对零残差归一化。逐前缀应用这个结论，才得到序列分布的一致性，而不只是单步巧合。
+
+例：词表三个 token，$p=[0.5,0.3,0.2]$，$q=[0.2,0.5,0.3]$。接受部分质量为 $[0.2,0.3,0.2]$，总接受率 0.7；拒绝时残差只落到第一个 token，补上 0.3，最终正好恢复 $p$。
+
+这里的 $p,q$ 必须是**实际使用的归一化分布**。若普通 target 解码包含温度、top-p 或重复惩罚，验证与残差也要使用同一套 target 变换；不能采样时截断、算接受率时却用原始概率。对有限精度误差、词表对齐和 EOS 也须定义一致语义。来源：[Fast Inference from Transformers via Speculative Decoding](https://arxiv.org/abs/2211.17192)。
+
+### 拒绝后为什么要回滚 KV Cache？
+
+Target 并行验证时可能已计算被拒绝 token 及其后缀的 KV；这些状态基于未被采用的前缀，不能继续复用。逻辑缓存只保留已接受前缀，再正确处理修正 token；draft 状态也要对齐。EOS 一旦被采纳，应停止该序列，不能为凑够草稿块继续输出。缓存回滚错了，即使接受公式正确，也不再是同一个条件分布。
+
 ### 局限
 
 如果草稿模型太差，接受率低，大模型经常要回退修正，**额外的草稿开销可能抵消收益**。
@@ -195,6 +237,10 @@ $$
 
 - 用 log 概率之和（连乘易下溢）
 - 加**长度惩罚** $\alpha$ 防止偏向短句
+
+每个新增 token 的 logprob 通常非正，原始 logprob 之和容易偏向短序列；除以长度幂会改变排序，并非单纯改善数值稳定性。例如长度 2、4 的候选，logprob 和为 -2、-3：原始分数选前者，$\alpha=1$ 时分数为 -1、-0.75，转而选后者。长度归一化是在改变搜索目标，也可能偏向冗长。
+
+完成的 EOS 候选应与未完成 beam 分开管理，不再继续扩展。提前停止应比较完成候选与未完成候选在当前评分规则下的可达上界；有长度归一化时，不能简单认为“第一个 EOS 出现就找到最优答案”。beam 再大也只是更充分地搜索给定模型评分，不保证事实性、任务奖励或人类偏好更好。
 
 ### 3) Temperature Sampling 温度采样
 

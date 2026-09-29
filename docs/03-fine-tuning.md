@@ -10,6 +10,7 @@ SFT / PEFT / 指令微调相关。
 - [Q04 · 指令微调（Instruction Tuning）](#q04--指令微调)
 - [Q05 · 灾难性遗忘 / 过拟合处理](#q05--常见微调问题)
 - [Q06 · 全量微调 vs LoRA 选型](#q06--全量微调-vs-lora-选型)
+- [Q07 · SFT 数据到监督信号的完整链路](#q07--sft-数据到监督信号的完整链路)
 
 ---
 
@@ -280,6 +281,62 @@ LoRA 只能减少基座权重直接漂移，不能保证不遗忘：adapter 输�
 
 - **Q：LoRA 多任务怎么部署？**
   A：保留一个基座 + 多个 LoRA adapter 文件，按需加载。一台机器可以同时服务多个领域的模型。
+
+---
+
+## Q07 · SFT 数据到监督信号的完整链路
+
+### chat template 是训练协议，不只是显示格式
+
+同一组 role/content 消息，模板会决定角色标记、轮次结束符、工具调用格式和 assistant 起始位置。训练与推理模板不一致，就可能让模型在错误前缀下生成，或学会错误的停止方式。应保存模板版本，并检查是否重复添加 BOS/EOS；训练完整回答时，不应机械地再追加一个等待模型续写的 generation prompt。
+
+**mask 要以最终 token 序列为准**。先分别 tokenize prompt 和 response 再拼接，不一定等于对完整字符串 tokenize：BPE 等分词器可能跨边界合并。优先使用模板提供的 token 对齐标记或可靠的区间映射，并抽样反解“实际被监督的 token”。[TRL 的 assistant-only loss](https://huggingface.co/docs/trl/sft_trainer#train-on-assistant-messages-only) 也依赖兼容的模板，而不只是一个开关。
+
+### 一个可手算的 shift 与标签例子
+
+假设以下每个符号恰好对应一个 token，仅用于说明对齐：
+
+| 位置 | input token | 未 shift 的 label | attention 有效位 |
+|---|---|---|---:|
+| 0 | BOS | ignore | 1 |
+| 1 | USER | ignore | 1 |
+| 2 | 问题 | ignore | 1 |
+| 3 | ASSISTANT | ignore | 1 |
+| 4 | 答案甲 | 答案甲 | 1 |
+| 5 | 答案乙 | 答案乙 | 1 |
+| 6 | EOS | EOS | 1 |
+| 7 | PAD | ignore | 0 |
+
+训练时位置 3 的 logit 预测位置 4 的“答案甲”，位置 4 预测“答案乙”，位置 5 预测 EOS。通常比较 logits 的前 $T-1$ 个位置与 labels 的后 $T-1$ 个位置；如果模型内部已 shift，外部不能再 shift 一遍。
+
+此处选择不监督 assistant 角色标记、监督回答内容和 EOS。若目标包括让模型主动产生工具控制 token，可以改变监督区间，但必须明确设计。ignore label 只是不在该位置计入直接 loss，**不等于对应上下文不会影响后续预测或收到间接梯度**。
+
+### attention mask 与 loss mask 为什么不能混为一谈？
+
+attention mask 决定当前位置可以读取哪些上下文；loss mask 决定哪些目标 token 参与优化。User/system 内容通常不直接计 loss，却必须作为回答的可见条件；把它们从 attention 中一并屏蔽，会改变任务。
+
+当 PAD 和 EOS 使用同一个 token ID 时，按 token ID 统一设 ignore 会把真正的 EOS 标签也删掉。应根据真实序列长度或 padding 位置区分两者，保留有效轮次结束符，否则模型可能学不好停止。
+
+### 多轮、工具消息与截断
+
+- **多轮监督**：可以监督所有 assistant 回答，也可以只监督最后一轮；前者使长对话提供更多监督 token，后者聚焦最后任务。不能只用一个 prompt_length 覆盖任意多轮格式。
+- **工具消息**：assistant 发起的工具调用通常属于模型动作；工具返回是外部观察，通常不作为要模仿生成的目标，但作为后续上下文。调用 ID、返回顺序与模板须一致。
+- **截断**：先决定保留哪些完整轮次及必要上下文，再按预算处理。回答被截掉但仍强行补 EOS，会把未完成答案标成正常结束；删除全部回答 token 则产生空监督样本。应分开统计这些情况。
+- **质量检查**：除了平均 loss，还要看每条样本有效标签数、EOS 监督比例、截断率、轮次与长度分桶；随机展示最终 token/label 对齐，而非只看原始 JSON。
+
+### Packing 如何改变模型看见的上下文？
+
+| 方式 | 注意力边界 | 意义与风险 |
+|---|---|---|
+| 直接拼接 + EOS | 后一个样本可能读取前一个样本 | 简单，但引入跨样本条件；EOS 本身不是注意力隔离墙 |
+| block-diagonal causal mask | 样本内因果、样本间不可见 | 保留独立样本语义；需后端支持相应 mask 或变长序列边界 |
+| 不 packing、按长度分桶 | 每条样本独立，仍有 padding | 实现直观，但 token 利用率可能较低 |
+
+仅重置 position IDs 不会阻止跨样本注意力；仅隔离 attention 也不能忘记 loss 的 shift 边界。独立 packing 时，后一段第一个 token 不能由前一段最后一个 logit 预测。position IDs 是否重置、loss 起始位是否屏蔽、内核的序列边界是否一致，应一起验证。
+
+### 训练 loss 下降，为什么生成可能变差？
+
+先排查模板、shift、mask 和终止符，再考虑数据质量、过拟合及曝光偏差：teacher forcing 总是在真实前缀上预测，而生成时会使用自己的错误前缀。应同时验证 held-out token loss 与实际生成任务，不能仅凭 loss 下降证明指令遵循或推理提升。变长样本的 token 权重与梯度累积参见 [Training Q09](02-training.md#q09--有效-token梯度累积与精确续训)。
 
 ---
 

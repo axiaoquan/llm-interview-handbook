@@ -27,15 +27,15 @@
 |---|---|
 | [00 · Foundations](docs/00-foundations.md) | 概率统计 / 机器学习基础 |
 | [01 · Architecture](docs/01-architecture.md) | Transformer / Attention / Position / Norm |
-| [02 · Training](docs/02-training.md) | 损失 / 优化器 / 分布式 / 混合精度 |
-| [03 · Fine-tuning](docs/03-fine-tuning.md) | LoRA / QLoRA / PEFT / 指令微调 |
-| [04 · Post-Training & Alignment](docs/04-alignment.md) | RLHF / Reward / PPO / DPO / GRPO / DAPO / GSPO / GDPO |
-| [05 · Inference](docs/05-inference.md) | KV Cache / Flash Attention / 量化 / 解码 |
+| [02 · Training](docs/02-training.md) | 优化器 / 混合精度 / 分布式 / 数据配比 / 计算预算 / token 加权 |
+| [03 · Fine-tuning](docs/03-fine-tuning.md) | LoRA / QLoRA / PEFT / 多轮 SFT / 标签掩码 / Packing |
+| [04 · Post-Training & Alignment](docs/04-alignment.md) | PPO / DPO / GRPO / DAPO / GSPO / GDPO / 策略更新链路 / 奖励约束与信用分配 |
+| [05 · Inference](docs/05-inference.md) | KV Cache / 在线 softmax / 投机解码推导 / 量化 / 解码 |
 | [06 · RAG](docs/06-rag.md) | 索引 / 检索 / 重排 / 高级 RAG |
 | [07 · Agent](docs/07-agent.md) | ReAct / Tool Use / Multi-Agent |
 | [08 · Multimodal](docs/08-multimodal.md) | CLIP / BLIP / LLaVA / Diffusion |
-| [09 · Evaluation](docs/09-evaluation.md) | MMLU / Hallucination / LLM-as-Judge |
-| [10 · System](docs/10-system.md) | 显存计算 / 服务化 / 部署 |
+| [09 · Evaluation](docs/09-evaluation.md) | 基准 / Judge 校准 / 配对统计 / 置信区间 / 去污染与复现 |
+| [10 · System](docs/10-system.md) | 显存计算 / 服务化 / 算术强度 / 延迟与吞吐 |
 | [99 · Frontier](docs/99-frontier.md) | DLM / Mamba / o1 推理时扩展 |
 
 ## 算法手撕
@@ -94,6 +94,13 @@
 - [LN 的方差为什么除以 n？BN 与 RMSNorm 有何区别？](docs/01-architecture.md#q06--layernorm--rmsnorm--prepost-norm)
 - [KV Cache 如何避免未来信息泄漏？](llm-coding/01-attention.md#q05--kv-cache-推理加速)
 - [GRPO 按回答平均和按 token 平均为何不同？](llm-coding/07-loss-rl.md#q05--grpo)
+- [变长 microbatch 为什么不能直接平均 loss？](docs/02-training.md#q09--有效-token梯度累积与精确续训)
+- [SFT 的 attention mask、loss mask 和 packing 边界有什么区别？](docs/03-fine-tuning.md#q07--sft-数据到监督信号的完整链路)
+- [奖励怎样经过优势、ratio 和 clipping 变成策略梯度？](docs/04-alignment.md#q13--从-rollout-到一次策略更新)
+- [奖励归一化为什么不能代替硬约束？](docs/04-alignment.md#q14--奖励尺度约束与信用分配)
+- [投机解码拒绝后的残差分布为什么正确？](docs/05-inference.md#q05--speculative-decoding-投机解码)
+- [评测提升是否超过抽样噪声？](docs/09-evaluation.md#q06--提升是否可信配对比较与置信区间)
+- [吞吐提高为什么不代表每个请求延迟降低？](docs/10-system.md#q06--从算术强度到延迟与吞吐)
 
 本地验证方法和覆盖边界见 [测试说明](tests/README.md)。
 

@@ -7,6 +7,7 @@
 - [Q03 · P/D 分离（Prefill / Decode）](#q03--pd-分离)
 - [Q04 · 推理成本估算](#q04--推理成本估算)
 - [Q05 · KV Cache 共享与 Prefix Cache](#q05--kv-cache-共享与-prefix-cache)
+- [Q06 · 从算术强度到延迟与吞吐](#q06--从算术强度到延迟与吞吐)
 
 ---
 
@@ -31,17 +32,38 @@
 
 ### Activation 显存
 
-约 $O(B \times L \times d \times N)$（B=batch, L=seq len, N=layers）。
-长序列下经常超过参数显存 → 用 **Activation Checkpointing**（重新计算换显存）。
+记 $B$ 为 batch、$S$ 为序列长度、$d$ 为 hidden size、$N$ 为层数。逐 token 激活通常包含 $O(BSdN)$ 项，其常数还取决于 FFN 宽度、激活函数、保存策略和 dtype；若物化并保存多头注意力矩阵，还会出现 $O(BH_qS^2N)$ 项。不能在普通 attention 与 FlashAttention 下使用同一个无条件估算。
+
+Activation Checkpointing 用反向重算减少保存的中间量，但 checkpoint 边界输入、当前重算工作集和通信 buffer 仍要占空间。FlashAttention 避免完整注意力矩阵存储，不代表所有训练激活都消失。
 
 ### 推理显存
 
-| 项 | bytes/param |
+| 项 | 总字节数口径 |
 |---|---|
-| 参数（FP16） | 2 |
-| KV Cache（动态） | $2 \times \text{batch} \times \text{seq} \times n_h \times d_h \times L \times 2$ |
+| 参数（FP16/BF16） | $2P$，$P$ 为参数量 |
+| KV Cache（各请求长度相同） | $2BSH_{kv}d_hNb_{kv}$，$b_{kv}$ 为每个缓存元素字节数 |
+| 其他 | 量化 scale/zero-point、分页元数据、临时 workspace、采样和运行时开销 |
 
-7B 模型推理：~14 GB 参数 + 几 GB KV Cache。
+KV 的第一个系数 2 表示 K/V 两份；$H_{kv}$ 是 KV 头数，不是 query 头数。变长请求将 $BS$ 换成各请求缓存长度之和；分页还应按已分配块数计费。该式用于普通 MHA/GQA/MQA，MLA 要按实际潜在向量及位置 key 的缓存形状重算。
+
+### 一组统一单位的手算
+
+设参数量 7B，BF16 权重；32 层、32 个 query 头、8 个 KV 头、head dim=128；4 个请求各缓存 8192 个 token，KV 为 BF16：
+
+```math
+M_{\mathrm{weight}}=7\times10^9\times2
+=14\ \mathrm{GB}\approx13.04\ \mathrm{GiB}
+```
+
+```math
+M_{\mathrm{KV}}
+=2\times4\times8192\times8\times128\times32\times2
+=4\ \mathrm{GiB}
+```
+
+权重加 KV 约为 17.04 GiB，仍不是峰值显存。若 KV 头数改为 32（MHA），其余不变，KV 变为 16 GiB；不能误用 query 头数把 GQA 缓存算大四倍。这里 $1\ \mathrm{GB}=10^9$ bytes，$1\ \mathrm{GiB}=2^{30}$ bytes。
+
+以本章 16 bytes/param 的训练状态口径为例，7B 的状态合计 112 GB；理想 8 路完整分片约为每卡 14 GB **常驻模型状态**。当前模块 all-gather、prefetch、激活和碎片会叠加形成更高峰值，不能据此保证某容量 GPU 一定能训练。分片生命周期见 [Training Q06](02-training.md#q06--分布式训练)。
 
 ### 追问
 
@@ -76,8 +98,8 @@ LLM 推理两个阶段特性完全不同：
 
 | 阶段 | 计算特性 | 瓶颈 |
 |---|---|---|
-| **Prefill** | 一次处理整个 prompt（并行） | **算力**（compute-bound） |
-| **Decode** | 一次出一个 token | **显存带宽**（memory-bound） |
+| **Prefill** | 一次处理多个 prompt token，矩阵乘复用权重 | 较容易 compute-bound；短输入、小 batch 也可能受其他开销限制 |
+| **Decode** | 每条序列通常一次出一个 token | 小 batch 常受权重/KV 带宽限制；长上下文或大 batch 也可能转向计算瓶颈 |
 
 ### P/D 分离架构
 
@@ -134,6 +156,38 @@ Prefix cache 通常要求 token 级前缀完全一致；哪怕空格、模板版
 
 - **Q：能省多少？**
   A：上限取决于可复用 prefix 占输入的比例和命中率。它主要省 prefill 计算，不能减少后续 decode token 的模型计算；应报告 cache hit rate、复用 token 数、TTFT 变化和 cache 占用，而不是给固定倍数。
+
+---
+
+## Q06 · 从算术强度到延迟与吞吐
+
+### 为什么同样的 FLOPs，会有不同的速度？
+
+令计算量为 $F$ FLOPs、实际搬运数据量为 $M$ bytes、有效算力为 $C$ FLOPs/s、有效带宽为 $BW$ bytes/s。忽略其他开销，执行时间受两者较慢的一项限制：
+
+```math
+t\gtrsim\max\!\left(\frac{F}{C},\frac{M}{BW}\right),
+\qquad I=\frac{F}{M}
+```
+
+$I$ 是算术强度。它低于设备的算力/带宽比值时，更可能受访存限制；高于该值也不代表必然满算力，因为还存在 kernel launch、通信、布局和并行度等限制。
+
+只看稠密权重主导的 decode 矩阵乘，忽略 KV 和其他项：$P$ 个参数为 $B$ 个 token 各计算约 $2P$ FLOPs，权重每步读一次、每参数占 $b$ bytes，则 $I\approx2B/b$。BF16 的 $b=2$，batch=1 时约 1 FLOP/byte，batch=16 时约 16。这解释了 batch 如何摊薄权重读取，但实际 KV 读取随上下文和并发增加，收益不会无限线性增长。
+
+### 为什么吞吐提高不代表用户更快拿到答案？
+
+- **TTFT**：从请求到首 token，通常包含排队、prefill 与调度等待；测量端点必须说明。
+- **TPOT / ITL**：后续 token 的平均时间或逐 token 间隔分布；平均值可能掩盖卡顿。
+- **端到端延迟**：近似 TTFT 加后续 token 时间，但实际间隔可能不均匀。
+- **吞吐**：单位时间处理的有效 token 或成功请求；需说明输入/输出、并发与长度分布。
+
+增加 batch 可提高总 tokens/s，却可能让单请求等待更久。Chunked prefill 把长 prompt 分段，与 decode 交错，能减少长 prefill 对已有请求的阻塞，但会改变新请求 TTFT、调度和 kernel 效率。P/D 分离还应把 KV 传输、两端排队与资源失衡算入收益，不能只比较两个独立 kernel 的速度。
+
+### 一个有用的基准测试应报告什么？
+
+固定模型/量化、硬件拓扑、软件版本与采样设置；给出输入/输出长度分布、并发或到达率、prefix 命中条件、预热方式。联合报告成功率、有效 output tokens/s、TTFT 和 ITL 的 p50/p95/p99。
+
+闭环测试中客户端等完成后才发下一次请求，会在系统变慢时自动降低到达率；固定到达率的开环测试更容易暴露排队失控。两者回答不同问题。讨论容量时应报告“满足延迟约束的成功吞吐”，不能把超时或丢弃请求从统计中静默删除。算术强度背景见 [Berkeley Lab Roofline 资料](https://amcr.lbl.gov/departments/computer-science-department/ppan/roofline-performance-model/ppan-roofline-publications/)。
 
 ---
 
