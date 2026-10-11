@@ -52,6 +52,7 @@
 | [08 · MonotonicStack](algorithms/08-monotonic-stack.md) | 每日温度 / 接雨水 / 柱状图 |
 | [09 · DP](algorithms/09-dp.md) | 基础 / 背包 / 子序列 |
 | [10 · Hot100](algorithms/10-hot100.md) | LeetCode Hot100 重点题 |
+| [11 · Interview Real Questions](algorithms/11-interview-real-questions.md) | 面试真题 / 算法变体 / 大模型手撕 |
 | [99 · Tips](algorithms/99-tips.md) | Python 易错点 / IO 模板 |
 
 ## LLM 手撕
