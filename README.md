@@ -1,118 +1,119 @@
-# LLM Interview Handbook · 大模型 + 算法面试手册
+# LLM Interview Handbook
 
-> 一个仓库覆盖 **AI 算法工程师面试** 两条核心战线：
-> **🤖 大模型知识** + **💻 代码手撕**
+**大模型与算法面试手册** · 从原理、追问到代码实现
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+面向 AI / 算法工程师的结构化复习资料，涵盖大模型知识、LLM 组件手撕与通用算法。既关注「怎么做」，也解释「为什么这样设计」和「什么时候不适用」。
+
+[![文档与代码检查](https://github.com/axiaoquan/llm-interview-handbook/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/axiaoquan/llm-interview-handbook/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-![Made for Interviews](https://img.shields.io/badge/Made%20for-Interviews-blue)
 
----
+[阅读路线](#阅读路线) · [大模型知识](#大模型知识) · [LLM 手撕](#llm-手撕) · [算法手撕](#算法手撕) · [重点追问](#重点追问) · [Star History](#star-history)
 
-## 这是什么？
+## 阅读路线
 
-为 **AI / 算法工程师** 准备的结构化面试手册。三个独立的知识体系：
+不必从头读到尾，可以按当前准备方向选择入口：
 
-- 🤖 **[大模型知识 (`docs/`)](docs/)** — Transformer / 训练 / 微调 / RAG / 推理优化 / 多模态 / 前沿
-- 💻 **[算法手撕 (`algorithms/`)](algorithms/)** — 数组 / 链表 / 树 / DP / Hot100
-- **[LLM 手撕 (`llm-coding/`)](llm-coding/)** — Attention / RoPE / LoRA / Beam Search
+- **梳理原理**：[基础知识](docs/00-foundations.md) → [模型架构](docs/01-architecture.md) → [训练方法](docs/02-training.md) → [推理优化](docs/05-inference.md)。
+- **重点准备后训练**：[SFT 与参数高效微调](docs/03-fine-tuning.md) → [对齐算法与奖励设计](docs/04-alignment.md) → [损失与强化学习实现](llm-coding/07-loss-rl.md) → [评测与验证](docs/09-evaluation.md)。
+- **准备手撕与实战问答**：从 [Attention](llm-coding/01-attention.md) 和 [通用算法题集](algorithms/README.md) 分别练习模型组件与数据结构，再用 [面试真题](algorithms/11-interview-real-questions.md) 检查掌握程度。
 
-**每章一个文件**，顶部带本章目录，顺着读完即可，不用频繁跳转。
+每章一个文件，顶部提供本章目录。复习时先尝试独立回答，再核对推导、实现和易错点；遇到设计细节，可以从下方的 [重点追问](#重点追问) 直接进入。
 
----
+## 内容目录
 
-## 大模型知识
+### 大模型知识
 
-| 章节 | 内容 |
-|---|---|
-| [00 · Foundations](docs/00-foundations.md) | 概率统计 / 机器学习基础 |
-| [01 · Architecture](docs/01-architecture.md) | Transformer / Attention / Position / Norm |
-| [02 · Training](docs/02-training.md) | 优化器 / 混合精度 / 分布式 / 数据配比 / 计算预算 / token 加权 |
-| [03 · Fine-tuning](docs/03-fine-tuning.md) | LoRA / QLoRA / PEFT / 多轮 SFT / 标签掩码 / Packing |
-| [04 · Post-Training & Alignment](docs/04-alignment.md) | PPO / DPO / GRPO / DAPO / GSPO / GDPO / 策略更新链路 / 奖励约束与信用分配 |
-| [05 · Inference](docs/05-inference.md) | KV Cache / 在线 softmax / 投机解码推导 / 量化 / 解码 |
-| [06 · RAG](docs/06-rag.md) | 索引 / 检索 / 重排 / 高级 RAG |
-| [07 · Agent](docs/07-agent.md) | ReAct / Tool Use / Multi-Agent |
-| [08 · Multimodal](docs/08-multimodal.md) | CLIP / BLIP / LLaVA / Diffusion |
-| [09 · Evaluation](docs/09-evaluation.md) | 基准 / Judge 校准 / 配对统计 / 置信区间 / 去污染与复现 |
-| [10 · System](docs/10-system.md) | 显存计算 / 服务化 / 算术强度 / 延迟与吞吐 |
-| [99 · Frontier](docs/99-frontier.md) | DLM / Mamba / o1 推理时扩展 |
+从基础原理到训练、后训练、推理与应用，重点说明设计动机、数学推导和适用边界。
 
-## 算法手撕
+| 章节 | 核心内容 |
+| :--- | :--- |
+| [00 · 基础知识](docs/00-foundations.md) | 概率统计、机器学习基础 |
+| [01 · 模型架构](docs/01-architecture.md) | Transformer、Attention、位置编码、归一化 |
+| [02 · 训练方法](docs/02-training.md) | 优化器、混合精度、分布式训练、数据配比与计算预算 |
+| [03 · 微调方法](docs/03-fine-tuning.md) | LoRA / QLoRA、SFT、标签掩码、Packing |
+| [04 · 后训练与对齐](docs/04-alignment.md) | PPO / DPO / GRPO / DAPO / GSPO / GDPO、奖励设计与信用分配 |
+| [05 · 推理优化](docs/05-inference.md) | KV Cache、在线 Softmax、投机解码、量化与解码 |
+| [06 · 检索增强生成](docs/06-rag.md) | RAG 索引、检索、重排与进阶方法 |
+| [07 · 智能体](docs/07-agent.md) | ReAct、工具调用、多智能体协作 |
+| [08 · 多模态](docs/08-multimodal.md) | CLIP、BLIP、LLaVA、Diffusion |
+| [09 · 模型评测](docs/09-evaluation.md) | 基准、Judge 校准、配对统计、置信区间、去污染与复现 |
+| [10 · 系统与部署](docs/10-system.md) | 显存估算、服务化、算术强度、延迟与吞吐 |
+| [99 · 前沿专题](docs/99-frontier.md) | DLM、Mamba、推理时扩展 |
 
-| 章节 | 内容 |
-|---|---|
-| [01 · Array](algorithms/01-array.md) | 二分 / 双指针 / 滑动窗口 / 前缀和 |
-| [02 · LinkedList](algorithms/02-linked-list.md) | 反转 / 双指针 / 环形 / 相交 |
-| [03 · HashTable](algorithms/03-hash-table.md) | 数组哈希 / set / map |
-| [04 · String](algorithms/04-string.md) | 反转 / KMP / 重复子串 |
-| [05 · StackQueue](algorithms/05-stack-queue.md) | 互相实现 / 单调队列 / 优先队列 |
-| [06 · BinaryTree](algorithms/06-binary-tree.md) | 三种遍历 / 层序 / 路径 |
-| [07 · Backtrack](algorithms/07-backtrack.md) | 组合 / 切割 / 子集 / 排列 |
-| [08 · MonotonicStack](algorithms/08-monotonic-stack.md) | 每日温度 / 接雨水 / 柱状图 |
-| [09 · DP](algorithms/09-dp.md) | 基础 / 背包 / 子序列 |
+### LLM 手撕
+
+用 PyTorch 理解模型组件，关注张量形状、梯度、数值稳定性和实现边界。使用方式见 [LLM 手撕题集](llm-coding/README.md)。
+
+| 章节 | 核心内容 |
+| :--- | :--- |
+| [01 · 注意力机制](llm-coding/01-attention.md) | Scaled Dot-Product、MHA、Causal Mask、GQA、KV Cache |
+| [02 · 位置编码](llm-coding/02-position-encoding.md) | Sinusoidal、RoPE、ALiBi |
+| [03 · 归一化](llm-coding/03-normalization.md) | LayerNorm、RMSNorm、BatchNorm 对比、Pre/Post-Norm |
+| [04 · 分词器](llm-coding/04-tokenizer.md) | BPE 训练、编码与词频统计 |
+| [05 · 解码策略](llm-coding/05-decoding.md) | Greedy、Top-k / Top-p、Beam Search、重复惩罚 |
+| [06 · 参数高效微调](llm-coding/06-peft.md) | LoRA、QLoRA Linear、Adapter |
+| [07 · 损失与强化学习](llm-coding/07-loss-rl.md) | CE、DPO、PPO、GRPO、Reward Model、多奖励归一化 |
+| [08 · 其他核心组件](llm-coding/08-misc.md) | MoE、分块 Attention（教学版）、权重共享、梯度技巧 |
+
+### 算法手撕
+
+按数据结构与解题模式整理，包含通用算法、Hot100 和独立的面试真题章节。刷题说明见 [算法题集](algorithms/README.md)。
+
+| 章节 | 核心内容 |
+| :--- | :--- |
+| [01 · 数组](algorithms/01-array.md) | 二分、双指针、滑动窗口、前缀和 |
+| [02 · 链表](algorithms/02-linked-list.md) | 反转、双指针、环形与相交 |
+| [03 · 哈希表](algorithms/03-hash-table.md) | 数组哈希、集合、映射 |
+| [04 · 字符串](algorithms/04-string.md) | 反转、KMP、重复子串 |
+| [05 · 栈与队列](algorithms/05-stack-queue.md) | 互相实现、单调队列、优先队列 |
+| [06 · 二叉树](algorithms/06-binary-tree.md) | 深度优先遍历、层序遍历、路径问题 |
+| [07 · 回溯](algorithms/07-backtrack.md) | 组合、切割、子集、排列 |
+| [08 · 单调栈](algorithms/08-monotonic-stack.md) | 每日温度、接雨水、柱状图 |
+| [09 · 动态规划](algorithms/09-dp.md) | 基础递推、背包、子序列 |
 | [10 · Hot100](algorithms/10-hot100.md) | LeetCode Hot100 重点题 |
-| [11 · Interview Real Questions](algorithms/11-interview-real-questions.md) | 面试真题 / 算法变体 / 大模型手撕 |
-| [99 · Tips](algorithms/99-tips.md) | Python 易错点 / IO 模板 |
+| [11 · 面试真题](algorithms/11-interview-real-questions.md) | LeetCode 原题、算法变体、机器学习与大模型题 |
+| [99 · Python 与面试技巧](algorithms/99-tips.md) | Python 易错点、输入输出模板 |
 
-## LLM 手撕
+## 重点追问
 
-| 章节 | 内容 |
-|---|---|
-| [01 · Attention](llm-coding/01-attention.md) | Scaled Dot-Product · MHA · Causal · GQA · KV Cache |
-| [02 · Position Encoding](llm-coding/02-position-encoding.md) | Sinusoidal · RoPE · ALiBi |
-| [03 · Normalization](llm-coding/03-normalization.md) | LayerNorm · RMSNorm · Pre/Post-Norm |
-| [04 · Tokenizer](llm-coding/04-tokenizer.md) | BPE 训练 / 编码 / 词频 |
-| [05 · Decoding](llm-coding/05-decoding.md) | Greedy · Top-k · Top-p · Beam Search · 重复惩罚 |
-| [06 · PEFT](llm-coding/06-peft.md) | LoRA · QLoRA · Adapter |
-| [07 · Loss & RL](llm-coding/07-loss-rl.md) | CE · DPO · PPO · GRPO · Reward Model · 多奖励归一化 |
-| [08 · Misc](llm-coding/08-misc.md) | MoE · Flash Attention · Tied Embedding · 梯度技巧 |
+从「记住结论」再往前一步：解释原因、明确假设，并能讨论替代设计。
 
----
-
-## 单题模板
-
-每题按统一结构组织：
-
-```markdown
-## QXX · 题目
-> 难度 / 公司 / 标签
-
-### 一句话答案 / 思路
-### 详细展开 / 代码
-### 追问 / 易错点
-### 参考
-```
-
-模板：[`docs/_TEMPLATE.md`](docs/_TEMPLATE.md) · [`algorithms/_TEMPLATE.md`](algorithms/_TEMPLATE.md)
-
----
-
-## 为什么这样设计：重点追问
+### 基础与微调
 
 - [LoRA 初始化能否反过来？首步梯度和有效更新有什么不同？](docs/03-fine-tuning.md#q01--lora-原理)
 - [交叉熵为什么取负对数？为什么梯度是预测减目标？](docs/02-training.md#q01--损失函数)
-- [LN 的方差为什么除以 n？BN 与 RMSNorm 有何区别？](docs/01-architecture.md#q06--layernorm--rmsnorm--prepost-norm)
-- [KV Cache 如何避免未来信息泄漏？](llm-coding/01-attention.md#q05--kv-cache-推理加速)
-- [GRPO 按回答平均和按 token 平均为何不同？](llm-coding/07-loss-rl.md#q05--grpo)
-- [变长 microbatch 为什么不能直接平均 loss？](docs/02-training.md#q09--有效-token梯度累积与精确续训)
+- [LayerNorm 的方差为什么除以 n？BatchNorm 与 RMSNorm 有何区别？](docs/01-architecture.md#q06--layernorm--rmsnorm--prepost-norm)
 - [SFT 的 attention mask、loss mask 和 packing 边界有什么区别？](docs/03-fine-tuning.md#q07--sft-数据到监督信号的完整链路)
+
+### 训练与奖励设计
+
+- [变长 microbatch 为什么不能直接平均 loss？](docs/02-training.md#q09--有效-token梯度累积与精确续训)
+- [GRPO 按回答平均和按 token 平均为何不同？](llm-coding/07-loss-rl.md#q05--grpo)
 - [奖励怎样经过优势、ratio 和 clipping 变成策略梯度？](docs/04-alignment.md#q13--从-rollout-到一次策略更新)
 - [奖励归一化为什么不能代替硬约束？](docs/04-alignment.md#q14--奖励尺度约束与信用分配)
+
+### 推理与评测
+
+- [KV Cache 如何避免未来信息泄漏？](llm-coding/01-attention.md#q05--kv-cache-推理加速)
 - [投机解码拒绝后的残差分布为什么正确？](docs/05-inference.md#q05--speculative-decoding-投机解码)
 - [评测提升是否超过抽样噪声？](docs/09-evaluation.md#q06--提升是否可信配对比较与置信区间)
 - [吞吐提高为什么不代表每个请求延迟降低？](docs/10-system.md#q06--从算术强度到延迟与吞吐)
 
-本地验证方法和覆盖边界见 [测试说明](tests/README.md)。
+## 贡献与验证
 
-## 贡献
+欢迎纠错、补充追问、完善解法或提供可核对的参考资料。提交前请阅读 [贡献指南](CONTRIBUTING.md)，新增内容可参考 [知识题模板](docs/_TEMPLATE.md) 与 [算法题模板](algorithms/_TEMPLATE.md)。
 
-欢迎 Issue / PR，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+仓库提供文档静态检查、公式解析与部分代码回归测试，运行方式及覆盖范围见 [测试说明](tests/README.md)。教学示例不等同于生产实现，检查通过也不代表所有示例和 GitHub 公式渲染都已验证。
 
-## License
+本项目采用 [MIT License](LICENSE)。
 
-[MIT](LICENSE)
+## Star History
 
----
-
-> 维护者：[@axiaoquan](https://github.com/axiaoquan) · 个人主页：<https://axiaoquan.github.io/>
+<a href="https://www.star-history.com/#axiaoquan/llm-interview-handbook&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=axiaoquan/llm-interview-handbook&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=axiaoquan/llm-interview-handbook&amp;type=Date" />
+    <img alt="llm-interview-handbook 的 GitHub Star 历史折线图" src="https://api.star-history.com/svg?repos=axiaoquan/llm-interview-handbook&amp;type=Date" width="800" />
+  </picture>
+</a>
