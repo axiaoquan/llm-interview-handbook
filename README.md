@@ -1,24 +1,25 @@
-# LLM Interview Handbook
+<h1 align="center">
+  <img src="assets/images/readme/cover.png" alt="LLM Interview Handbook · 大模型算法工程师面试手册" width="100%" />
+</h1>
 
-**大模型与算法面试手册** · 从原理、追问到代码实现
+<p align="center">
+  <a href="https://github.com/axiaoquan/llm-interview-handbook/actions/workflows/validate.yml"><img src="https://github.com/axiaoquan/llm-interview-handbook/actions/workflows/validate.yml/badge.svg?branch=main" alt="文档与代码检查" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" /></a>
+</p>
 
-面向 AI / 算法工程师的结构化复习资料，涵盖大模型知识、LLM 组件手撕与通用算法。既关注「怎么做」，也解释「为什么这样设计」和「什么时候不适用」。
+面向大模型算法工程师的面试复习资料，整理知识问答、模型组件实现与通用算法题解。知识部分涵盖模型架构、训练与后训练、推理优化、RAG、Agent 和多模态；代码部分提供 LLM 组件手撕、数据结构与算法题，以及面试真题的参考解法。
 
-[![文档与代码检查](https://github.com/axiaoquan/llm-interview-handbook/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/axiaoquan/llm-interview-handbook/actions/workflows/validate.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+各章按专题组织，可直接查阅具体问题。除参考答案外，也讨论设计动机、公式推导与实现中的易错点。
 
-[阅读路线](#阅读路线) · [大模型知识](#大模型知识) · [LLM 手撕](#llm-手撕) · [算法手撕](#算法手撕) · [重点追问](#重点追问) · [Star History](#star-history)
-
-## 阅读路线
-
-不必从头读到尾，可以按当前准备方向选择入口：
-
-- **梳理原理**：[基础知识](docs/00-foundations.md) → [模型架构](docs/01-architecture.md) → [训练方法](docs/02-training.md) → [推理优化](docs/05-inference.md)。
-- **重点准备后训练**：[SFT 与参数高效微调](docs/03-fine-tuning.md) → [对齐算法与奖励设计](docs/04-alignment.md) → [损失与强化学习实现](llm-coding/07-loss-rl.md) → [评测与验证](docs/09-evaluation.md)。
-- **准备手撕与实战问答**：从 [Attention](llm-coding/01-attention.md) 和 [通用算法题集](algorithms/README.md) 分别练习模型组件与数据结构，再用 [面试真题](algorithms/11-interview-real-questions.md) 检查掌握程度。
-
-每章一个文件，顶部提供本章目录。复习时先尝试独立回答，再核对推导、实现和易错点；遇到设计细节，可以从下方的 [重点追问](#重点追问) 直接进入。
+<p align="center">
+  <a href="#大模型知识">大模型知识</a> ·
+  <a href="#llm-手撕">LLM 手撕</a> ·
+  <a href="#算法手撕">算法手撕</a> ·
+  <a href="algorithms/11-interview-real-questions.md">面试真题</a> ·
+  <a href="#重点追问">重点追问</a> ·
+  <a href="#贡献与验证">参与贡献</a>
+</p>
 
 ## 内容目录
 
